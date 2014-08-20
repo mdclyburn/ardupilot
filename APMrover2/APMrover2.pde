@@ -552,6 +552,7 @@ static const AP_Scheduler::Task scheduler_tasks[] PROGMEM = {
     { navigate,               5,   1600 },
     { update_compass,         5,   2000 },
     { update_commands,        5,   1000 },
+    { log_depth,              50,  1000 },
     { update_logging1,        5,   1000 },
     { update_logging2,        5,   1000 },
     { gcs_retry_deferred,     1,   1000 },
@@ -945,6 +946,11 @@ static void update_navigation()
         }
         break;
 	}
+}
+
+void log_depth()
+{
+  return;  
 }
 
 AP_HAL_MAIN();
