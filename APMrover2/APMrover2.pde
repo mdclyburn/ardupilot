@@ -552,7 +552,6 @@ static const AP_Scheduler::Task scheduler_tasks[] PROGMEM = {
     { navigate,               5,   1600 },
     { update_compass,         5,   2000 },
     { update_commands,        5,   1000 },
-    { log_depth,              50,  1000 },
     { update_logging1,        5,   1000 },
     { update_logging2,        5,   1000 },
     { gcs_retry_deferred,     1,   1000 },
@@ -795,6 +794,8 @@ static void one_second_loop(void)
         }
         counter = 0;
     }
+
+	log_depth();
 }
 
 static void update_GPS_50Hz(void)
@@ -950,7 +951,8 @@ static void update_navigation()
 
 void log_depth()
 {
-  return;  
+	gcs_send_text_P(SEVERITY_LOW, PSTR("Depth logging test.\n"));
+	return;  
 }
 
 AP_HAL_MAIN();
