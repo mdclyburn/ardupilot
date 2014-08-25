@@ -951,7 +951,33 @@ static void update_navigation()
 
 void log_depth()
 {
-	gcs_send_text_P(SEVERITY_LOW, PSTR("Depth logging test.\n"));
+	// Print out data out to telemetry log.
+	// e.g.: gcs_send_text_P(SEVERITY_LOW, PSTR("Bah."));
+	// e.g.: gcs_send_text_fmt(PSTR("Bah. %d"), 0);
+
+	// Get last GPS data.
+	int lat = g_gps->latitude;
+	int lng = g_gps->longitude;
+
+	// Ensure GPS is available.
+	// Reference /libraries/AP_GPS/GPS.h:35
+	GPS::GPS_Status status = g_gps->status();
+	switch(status)
+	{
+		case GPS::NO_GPS:
+		case GPS::NO_FIX:
+			gcs_send_text_fmt(PSTR("DEPTH %d %d %d"), 0, 0, 0);
+			break;
+		case GPS::GPS_OK_FIX_2D:
+		case GPS::GPS_OK_FIX_3D:
+			// Hardware unavailable for testing at the moment. Data will come
+			// out as 'DEPTH <depth> <latitude> <longitude>'.
+			gcs_send_text_fmt(PSTR("DEPTH %d %d %d"), 0, lat, lng);
+			break;
+		default:
+			break;
+	}
+
 	return;  
 }
 
