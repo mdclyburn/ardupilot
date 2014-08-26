@@ -951,20 +951,21 @@ void log_depth()
 	// e.g.: gcs_send_text_fmt(PSTR("Bah. %d"), 0);
 
 	// Get last GPS data.
-	int32_t lat = g_gps->latitude;
-	int32_t lng = g_gps->longitude;
+	Location location = gps.location();
+	int32_t lat = location.lat;
+	int32_t lng = location.lng;
 
 	// Ensure GPS is available.
-	// Reference /libraries/AP_GPS/GPS.h:35
-	GPS::GPS_Status status = g_gps->status();
+	AP_GPS::GPS_Status status = gps.status();
+
 	switch(status)
 	{
-		case GPS::NO_GPS:
-		case GPS::NO_FIX:
+		case AP_GPS::NO_GPS:
+		case AP_GPS::NO_FIX:
 			gcs_send_text_fmt(PSTR("DEPTH %d %d %d"), 0, 0, 0);
 			break;
-		case GPS::GPS_OK_FIX_2D:
-		case GPS::GPS_OK_FIX_3D:
+		case AP_GPS::GPS_OK_FIX_2D:
+		case AP_GPS::GPS_OK_FIX_3D:
 			// Hardware unavailable for testing at the moment. Data will come
 			// out as 'DEPTH <depth> <latitude> <longitude>'.
 			gcs_send_text_fmt(PSTR("DEPTH %d %d %d"), 0, lat, lng);
