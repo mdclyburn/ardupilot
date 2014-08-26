@@ -12,6 +12,7 @@
 #include <AP_ADC.h>             // ArduPilot Mega Analog to Digital Converter Library
 #include <AP_ADC_AnalogSource.h>
 #include <AP_Baro.h>            // ArduPilot Mega Barometer Library
+#include <AP_Baro_Glitch.h>     // Baro glitch protection library
 #include <Filter.h>
 #include <AP_Compass.h>         // ArduPilot Mega Magnetometer Library
 #include <AP_Declination.h>
@@ -21,13 +22,16 @@
 #include <AP_Vehicle.h>
 #include <DataFlash.h>
 #include <AC_PID.h>             // PID library
-#include <APM_PI.h>             // PID library
+#include <AC_P.h>               // P library
 #include <AP_Buffer.h>          // ArduPilot general purpose FIFO buffer
 #include <DataFlash.h>
 #include <GCS_MAVLink.h>
+#include <AP_Mission.h>
+#include <StorageManager.h>
+#include <AP_Terrain.h>
 #include <AP_Notify.h>
-
 #include <AP_InertialNav.h>
+
 const AP_HAL::HAL& hal = AP_HAL_BOARD_DRIVER;
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_APM2
@@ -42,14 +46,14 @@ AP_InertialSensor_Oilpan ins(&adc);
 AP_Baro_BMP085 baro;
 #endif
 
-GPS *gps;
-AP_GPS_Auto auto_gps(&gps);
+AP_GPS gps;
 GPS_Glitch   gps_glitch(gps);
+Baro_Glitch baro_glitch(baro);
 
 AP_Compass_HMC5843 compass;
-AP_AHRS_DCM ahrs(ins, gps);
+AP_AHRS_DCM ahrs(ins, baro, gps);
 
-AP_InertialNav inertialnav(&ahrs, &baro, gps, gps_glitch);
+AP_InertialNav inertialnav(ahrs, baro, gps_glitch, baro_glitch);
 
 uint32_t last_update;
 
@@ -57,8 +61,7 @@ void setup(void)
 {
     hal.console->println_P(PSTR("AP_InertialNav test startup..."));
 
-    gps = &auto_gps;
-    gps->init(hal.uartB, GPS::GPS_ENGINE_AIRBORNE_2G);
+    gps.init(NULL);
 
     ins.init(AP_InertialSensor::COLD_START, 
 			 AP_InertialSensor::RATE_100HZ);
@@ -69,13 +72,13 @@ void setup(void)
 
     inertialnav.init();
     inertialnav.set_velocity_xy(0,0);
-    inertialnav.set_home_position(0,0);
+    inertialnav.setup_home_position();
 }
 
 void loop(void)
 {
     hal.scheduler->delay(20);
-    gps->update();
+    gps.update();
     ahrs.update();
     uint32_t currtime = hal.scheduler->millis();
     float dt = (currtime - last_update) / 1000.0f;

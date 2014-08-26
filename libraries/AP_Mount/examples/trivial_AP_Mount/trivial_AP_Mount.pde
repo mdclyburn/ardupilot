@@ -17,6 +17,9 @@
 #include <AP_Buffer.h>
 #include <Filter.h>
 #include <GCS_MAVLink.h>
+#include <AP_Mission.h>
+#include <StorageManager.h>
+#include <AP_Terrain.h>
 #include <RC_Channel.h>
 #include <AP_Airspeed.h>
 #include <AP_Vehicle.h>

@@ -97,9 +97,9 @@ def convert_gpx():
     return True
 
 
-def test_prerequesites():
+def test_prerequisites():
     '''check we have the right directories and tools to run tests'''
-    print("Testing prerequesites")
+    print("Testing prerequisites")
     util.mkdir_p(util.reltopdir('../buildlogs'))
     return True
 
@@ -150,7 +150,6 @@ def fly_ArduCopter_scripted(testname):
     mavproxy.expect('Received [0-9]+ parameters')
 
     # setup test parameters
-    mavproxy.send('param set SYSID_THISMAV %u\n' % random.randint(100, 200))
     mavproxy.send("param load %s/ArduCopter.parm\n" % testdir)
     mavproxy.expect('Loaded [0-9]+ parameters')
 

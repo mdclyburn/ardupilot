@@ -1,4 +1,4 @@
-// -*- tab-width: 4; Mode: C++; c-basic-offset: 4; indent-tabs-mode: t -*-
+// -*- tab-width: 4; Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
 #include "AP_TECS.h"
 #include <AP_HAL.h>
@@ -109,6 +109,54 @@ const AP_Param::GroupInfo AP_TECS::var_info[] PROGMEM = {
 	// @User: User
     AP_GROUPINFO("SINK_MAX",  11, AP_TECS, _maxSinkRate, 5.0f),
 
+    // @Param: LAND_ARSPD
+    // @DisplayName: Airspeed during landing approach (m/s)
+    // @Description: When performing an autonomus landing, this value is used as the goal airspeed during approach.  Note that this parameter is not useful if your platform does not have an airspeed sensor (use TECS_LAND_THR instead).  If negative then this value is not used during landing.
+    // @Range: -1 to 127
+    // @Increment: 1
+    // @User: User
+    AP_GROUPINFO("LAND_ARSPD", 12, AP_TECS, _landAirspeed, -1),
+
+    // @Param: LAND_THR
+    // @DisplayName: Cruise throttle during landing approach (percentage)
+    // @Description: Use this parameter instead of LAND_ASPD if your platform does not have an airspeed sensor.  It is the cruise throttle during landing approach.  If it is negative if TECS_LAND_ASPD is in use then this value is not used during landing.
+    // @Range: -1 to 100
+    // @Increment: 0.1
+    // @User: User
+    AP_GROUPINFO("LAND_THR", 13, AP_TECS, _landThrottle, -1),
+
+    // @Param: LAND_SPDWGT
+    // @DisplayName: Weighting applied to speed control during landing.
+    // @Description: Same as SPDWEIGHT parameter, with the exception that this parameter is applied during landing flight stages.  A value closer to 2 will result in the plane ignoring height error during landing and our experience has been that the plane will therefore keep the nose up -- sometimes good for a glider landing (with the side effect that you will likely glide a ways past the landing point).  A value closer to 0 results in the plane ignoring speed error -- use caution when lowering the value below 1 -- ignoring speed could result in a stall.
+	// @Range: 0.0 to 2.0
+	// @Increment: 0.1
+	// @User: Advanced
+    AP_GROUPINFO("LAND_SPDWGT", 14, AP_TECS, _spdWeightLand, 1.0f),
+
+    // @Param: PITCH_MAX
+    // @DisplayName: Maximum pitch in auto flight
+    // @Description: This controls maximum pitch up in automatic throttle modes. If this is set to zero then LIM_PITCH_MAX is used instead. The purpose of this parameter is to allow the use of a smaller pitch range when in automatic flight than what is used in FBWA mode.
+	// @Range: 0 45
+	// @Increment: 1
+	// @User: Advanced
+    AP_GROUPINFO("PITCH_MAX", 15, AP_TECS, _pitch_max, 0),
+
+    // @Param: PITCH_MIN
+    // @DisplayName: Minimum pitch in auto flight
+    // @Description: This controls minimum pitch in automatic throttle modes. If this is set to zero then LIM_PITCH_MIN is used instead. The purpose of this parameter is to allow the use of a smaller pitch range when in automatic flight than what is used in FBWA mode. Note that TECS_PITCH_MIN should be a negative number.
+	// @Range: -45 0
+	// @Increment: 1
+	// @User: Advanced
+    AP_GROUPINFO("PITCH_MIN", 16, AP_TECS, _pitch_min, 0),
+
+    // @Param: LAND_SINK
+    // @DisplayName: Sink rate for final landing stage
+    // @Description: The sink rate in meters/second for the final stage of landing.
+	// @Range: 0.0 to 2.0
+	// @Increment: 0.1
+	// @User: Advanced
+    AP_GROUPINFO("LAND_SINK", 17, AP_TECS, _land_sink, 0.25f),
+
     AP_GROUPEND
 };
 
@@ -150,38 +198,39 @@ void AP_TECS::update_50hz(float hgt_afe)
 	}
 	_update_50hz_last_usec = now;	
 
-	// Get height acceleration
-	float hgt_ddot_mea = -(_ahrs.get_accel_ef().z + GRAVITY_MSS);
-	// Perform filter calculation using backwards Euler integration
-    // Coefficients selected to place all three filter poles at omega
-	float omega2 = _hgtCompFiltOmega*_hgtCompFiltOmega;
-	float hgt_err = hgt_afe - _integ3_state;
-	float integ1_input = hgt_err * omega2 * _hgtCompFiltOmega;
-	_integ1_state = _integ1_state + integ1_input * DT;
-	float integ2_input = _integ1_state + hgt_ddot_mea + hgt_err * omega2 * 3.0f;
-	_integ2_state = _integ2_state + integ2_input * DT;
-	float integ3_input = _integ2_state + hgt_err * _hgtCompFiltOmega * 3.0f;
-    // If more than 1 second has elapsed since last update then reset the integrator state
-    // to the measured height
-    if (DT > 1.0) {
-        _integ3_state = hgt_afe;
-    } else {
-	    _integ3_state = _integ3_state + integ3_input*DT;
-    }
+	// USe inertial nav verical velocity and height if available
+	Vector3f posned, velned;
+	if (_ahrs.get_velocity_NED(velned) && _ahrs.get_relative_position_NED(posned)) {
+		_integ2_state   = - velned.z;
+		_integ3_state   = - posned.z;
+	} else {
+		// Get height acceleration
+		float hgt_ddot_mea = -(_ahrs.get_accel_ef().z + GRAVITY_MSS);
+		// Perform filter calculation using backwards Euler integration
+		// Coefficients selected to place all three filter poles at omega
+		float omega2 = _hgtCompFiltOmega*_hgtCompFiltOmega;
+		float hgt_err = hgt_afe - _integ3_state;
+		float integ1_input = hgt_err * omega2 * _hgtCompFiltOmega;
+		_integ1_state = _integ1_state + integ1_input * DT;
+		float integ2_input = _integ1_state + hgt_ddot_mea + hgt_err * omega2 * 3.0f;
+		_integ2_state = _integ2_state + integ2_input * DT;
+		float integ3_input = _integ2_state + hgt_err * _hgtCompFiltOmega * 3.0f;
+		// If more than 1 second has elapsed since last update then reset the integrator state
+		// to the measured height
+		if (DT > 1.0) {
+		    _integ3_state = hgt_afe;
+		} else {
+			_integ3_state = _integ3_state + integ3_input*DT;
+		}
+	}
 
 	// Update and average speed rate of change
-    // Only required if airspeed is being measured and controlled
-    float temp = 0;
-	if (_ahrs.airspeed_sensor_enabled() && _ahrs.airspeed_estimate_true(&_EAS)) {
-        // Get DCM
-        const Matrix3f &rotMat = _ahrs.get_dcm_matrix();
-	    // Calculate speed rate of change
-	    temp = rotMat.c.x * GRAVITY_MSS + _ahrs.get_ins().get_accel().x;
-	    // take 5 point moving average
-        _vel_dot = _vdot_filter.apply(temp);
-    } else {
-       _vel_dot = 0.0f;
-    }
+    // Get DCM
+    const Matrix3f &rotMat = _ahrs.get_dcm_matrix();
+	// Calculate speed rate of change
+	float temp = rotMat.c.x * GRAVITY_MSS + _ahrs.get_ins().get_accel().x;
+	// take 5 point moving average
+    _vel_dot = _vdot_filter.apply(temp);
 
 }
 
@@ -196,8 +245,15 @@ void AP_TECS::_update_speed(void)
 
     float EAS2TAS = _ahrs.get_EAS2TAS();
     _TAS_dem  = _EAS_dem * EAS2TAS;
-    _TASmax   = aparm.airspeed_max * EAS2TAS;
-    _TASmin   = aparm.airspeed_min * EAS2TAS;
+	_TASmax   = aparm.airspeed_max * EAS2TAS;
+	_TASmin   = aparm.airspeed_min * EAS2TAS;
+    if (_landAirspeed >= 0 && _ahrs.airspeed_sensor_enabled() &&
+           (_flight_stage == FLIGHT_LAND_APPROACH || _flight_stage== FLIGHT_LAND_FINAL)) {
+		_TAS_dem = _landAirspeed * EAS2TAS;
+		if (_TASmin > _TAS_dem) {
+			_TASmin = _TAS_dem;
+		}
+    }
 
     // Reset states of time since last update is too large
     if (DT > 1.0) {
@@ -211,7 +267,7 @@ void AP_TECS::_update_speed(void)
     // airspeed is not being used and set speed rate to zero
     if (!_ahrs.airspeed_sensor_enabled() || !_ahrs.airspeed_estimate(&_EAS)) {
         // If no airspeed available use average of min and max
-        _EAS = 0.5f * (aparm.airspeed_min + aparm.airspeed_max);
+        _EAS = 0.5f * (aparm.airspeed_min.get() + (float)aparm.airspeed_max.get());
     }
 
     // Implement a second order complementary filter to obtain a
@@ -305,6 +361,12 @@ void AP_TECS::_update_height_demand(void)
 	_hgt_dem_adj = 0.05f * _hgt_dem + 0.95f * _hgt_dem_adj_last;
     _hgt_rate_dem = (_hgt_dem_adj - _hgt_dem_adj_last) / 0.1f;
 	_hgt_dem_adj_last = _hgt_dem_adj;
+
+    // in final landing stage force height rate demand to the
+    // configured sink rate
+	if (_flight_stage == FLIGHT_LAND_FINAL) {
+        _hgt_rate_dem = - _land_sink;
+	}
 }
 
 void AP_TECS::_detect_underspeed(void) 
@@ -339,12 +401,17 @@ void AP_TECS::_update_energies(void)
     // Calculate specific energy rate
     _SPEdot = _integ2_state * GRAVITY_MSS;
     _SKEdot = _integ5_state * _vel_dot;
+
 }
 
 void AP_TECS::_update_throttle(void)
 {
-    // Calculate total energy values
-    _STE_error = _SPE_dem - _SPE_est + _SKE_dem - _SKE_est;
+    // Calculate limits to be applied to potential energy error to prevent over or underspeed occurring due to large height errors
+    float SPE_err_max = 0.5f * _TASmax * _TASmax - _SKE_dem;
+    float SPE_err_min = 0.5f * _TASmin * _TASmin - _SKE_dem;
+
+    // Calculate total energy error
+    _STE_error = constrain_float((_SPE_dem - _SPE_est), SPE_err_min, SPE_err_max) + _SKE_dem - _SKE_est;
     float STEdot_dem = constrain_float((_SPEdot_dem + _SKEdot_dem), _STEdot_min, _STEdot_max);
     float STEdot_error = STEdot_dem - _SPEdot - _SKEdot;
 
@@ -366,7 +433,7 @@ void AP_TECS::_update_throttle(void)
 
         // Calculate feed-forward throttle
         float ff_throttle = 0;
-		float nomThr = aparm.throttle_cruise * 0.01f;
+        float nomThr = aparm.throttle_cruise * 0.01f;
 		const Matrix3f &rotMat = _ahrs.get_dcm_matrix();
 		// Use the demanded rate of change of total energy as the feed-forward demand, but add
 		// additional component which scales with (1/cos(bank angle) - 1) to compensate for induced
@@ -423,7 +490,16 @@ void AP_TECS::_update_throttle(void)
 void AP_TECS::_update_throttle_option(int16_t throttle_nudge)
 {
 	// Calculate throttle demand by interpolating between pitch and throttle limits
-    float nomThr = (aparm.throttle_cruise + throttle_nudge)* 0.01f;	
+    float nomThr;
+    //If landing and we don't have an airspeed sensor and we have a non-zero
+    //TECS_LAND_THR param then use it
+    if ((_flight_stage == FLIGHT_LAND_APPROACH || _flight_stage== FLIGHT_LAND_FINAL) &&
+           _landThrottle >= 0) {            
+        nomThr = (_landThrottle + throttle_nudge) * 0.01f;
+    } else { //not landing or not using TECS_LAND_THR parameter
+		nomThr = (aparm.throttle_cruise + throttle_nudge)* 0.01f;
+    }
+    
 	if (_flight_stage == AP_TECS::FLIGHT_TAKEOFF)
 	{
 		_throttle_dem = _THRmaxf;
@@ -482,16 +558,17 @@ void AP_TECS::_update_pitch(void)
     // This is used to determine how the pitch control prioritises speed and height control
     // A weighting of 1 provides equal priority (this is the normal mode of operation)
     // A SKE_weighting of 0 provides 100% priority to height control. This is used when no airspeed measurement is available
-	// A SKE_weighting of 2 provides 100% priority to speed control. This is used when an underspeed condition is detected
-	// or during takeoff/climbout where a minimum pitch angle is set to ensure height is gained. In this instance, if airspeed
+	// A SKE_weighting of 2 provides 100% priority to speed control. This is used when an underspeed condition is detected. In this instance, if airspeed
 	// rises above the demanded value, the pitch angle will be increased by the TECS controller.
 	float SKE_weighting = constrain_float(_spdWeight, 0.0f, 2.0f);
-	if ( ( _underspeed || (_flight_stage == AP_TECS::FLIGHT_TAKEOFF) ) && 
-		 _ahrs.airspeed_sensor_enabled() ) {
-		SKE_weighting = 2.0f;
-	} else if (!_ahrs.airspeed_sensor_enabled()) {
+    if (!_ahrs.airspeed_sensor_enabled()) {
 		SKE_weighting = 0.0f;
-	}
+    } else if ( _underspeed || _flight_stage == AP_TECS::FLIGHT_TAKEOFF) {
+		SKE_weighting = 2.0f;
+    } else if (_flight_stage == AP_TECS::FLIGHT_LAND_APPROACH || _flight_stage == AP_TECS::FLIGHT_LAND_FINAL) {
+        SKE_weighting = constrain_float(_spdWeightLand, 0.0f, 2.0f);
+    }
+    
 	float SPE_weighting = 2.0f - SKE_weighting;
 
     // Calculate Specific Energy Balance demand, and error
@@ -609,8 +686,24 @@ void AP_TECS::update_pitch_throttle(int32_t hgt_dem_cm,
 	_EAS_dem = EAS_dem_cm * 0.01f;
     _THRmaxf  = aparm.throttle_max * 0.01f;
     _THRminf  = aparm.throttle_min * 0.01f;
-	_PITCHmaxf = 0.000174533f * aparm.pitch_limit_max_cd;
-	_PITCHminf = 0.000174533f * aparm.pitch_limit_min_cd;
+
+	// work out the maximum and minimum pitch
+	// if TECS_PITCH_{MAX,MIN} isn't set then use
+	// LIM_PITCH_{MAX,MIN}. Don't allow TECS_PITCH_{MAX,MIN} to be
+	// larger than LIM_PITCH_{MAX,MIN}
+	if (_pitch_max <= 0) {
+		_PITCHmaxf = aparm.pitch_limit_max_cd * 0.01f;
+	} else {
+		_PITCHmaxf = min(_pitch_max, aparm.pitch_limit_max_cd * 0.01f);
+	}
+	if (_pitch_min >= 0) {
+		_PITCHminf = aparm.pitch_limit_min_cd * 0.01f;
+	} else {
+		_PITCHminf = max(_pitch_min, aparm.pitch_limit_min_cd * 0.01f);
+	}
+	// convert to radians
+	_PITCHmaxf = radians(_PITCHmaxf);
+	_PITCHminf = radians(_PITCHminf);
 	_flight_stage = flight_stage;
 
 	// initialise selected states and variables if DT > 1 second or in climbout

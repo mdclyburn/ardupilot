@@ -1,18 +1,11 @@
 // -*- tab-width: 4; Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
-// Sensors are not available in HIL_MODE_ATTITUDE
-#if HIL_MODE != HIL_MODE_ATTITUDE
-
  #if CONFIG_SONAR == ENABLED
 static void init_sonar(void)
 {
-  #if CONFIG_SONAR_SOURCE == SONAR_SOURCE_ADC
-    sonar->calculate_scaler(g.sonar_type, 3.3f);
-  #else
-    sonar->calculate_scaler(g.sonar_type, 5.0f);
-  #endif
+    sonar.init();
 }
- #endif
+#endif
 
 static void init_barometer(bool full_calibration)
 {
@@ -29,22 +22,43 @@ static void init_barometer(bool full_calibration)
 static int32_t read_barometer(void)
 {
     barometer.read();
-    return barometer.get_altitude() * 100.0f;
+    if (g.log_bitmask & MASK_LOG_IMU) {
+        Log_Write_Baro();
+    }
+    int32_t balt = barometer.get_altitude() * 100.0f;
+
+    // run glitch protection and update AP_Notify if home has been initialised
+    baro_glitch.check_alt();
+    bool report_baro_glitch = (baro_glitch.glitching() && !ap.usb_connected && hal.util->safety_switch_state() != AP_HAL::Util::SAFETY_DISARMED);
+    if (AP_Notify::flags.baro_glitching != report_baro_glitch) {
+        if (baro_glitch.glitching()) {
+            Log_Write_Error(ERROR_SUBSYSTEM_BARO, ERROR_CODE_BARO_GLITCH);
+        } else {
+            Log_Write_Error(ERROR_SUBSYSTEM_BARO, ERROR_CODE_ERROR_RESOLVED);
+        }
+        AP_Notify::flags.baro_glitching = report_baro_glitch;
+    }
+
+    // return altitude
+    return balt;
 }
 
 // return sonar altitude in centimeters
 static int16_t read_sonar(void)
 {
 #if CONFIG_SONAR == ENABLED
+    sonar.update();
+
     // exit immediately if sonar is disabled
-    if( !g.sonar_enabled ) {
+    if (!sonar_enabled || !sonar.healthy()) {
         sonar_alt_health = 0;
         return 0;
     }
 
-    int16_t temp_alt = sonar->read();
+    int16_t temp_alt = sonar.distance_cm();
 
-    if (temp_alt >= sonar->min_distance && temp_alt <= sonar->max_distance * SONAR_RELIABLE_DISTANCE_PCT) {
+    if (temp_alt >= sonar.min_distance_cm() && 
+        temp_alt <= sonar.max_distance_cm() * SONAR_RELIABLE_DISTANCE_PCT) {
         if ( sonar_alt_health < SONAR_ALT_HEALTH_MAX ) {
             sonar_alt_health++;
         }
@@ -54,7 +68,7 @@ static int16_t read_sonar(void)
 
  #if SONAR_TILT_CORRECTION == 1
     // correct alt for angle of the sonar
-    float temp = cos_pitch_x * cos_roll_x;
+    float temp = ahrs.cos_pitch() * ahrs.cos_roll();
     temp = max(temp, 0.707f);
     temp_alt = (float)temp_alt * temp;
  #endif
@@ -64,9 +78,6 @@ static int16_t read_sonar(void)
     return 0;
 #endif
 }
-
-
-#endif // HIL_MODE != HIL_MODE_ATTITUDE
 
 static void init_compass()
 {

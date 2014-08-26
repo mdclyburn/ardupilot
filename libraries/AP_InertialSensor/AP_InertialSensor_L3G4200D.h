@@ -19,7 +19,7 @@ public:
 
     /* Concrete implementation of AP_InertialSensor functions: */
     bool            update();
-    float        	get_delta_time();
+    float        	get_delta_time() const;
     float           get_gyro_drift_rate();
     bool            wait_for_sample(uint16_t timeout_ms);
 
@@ -34,6 +34,8 @@ private:
     uint32_t        _last_sample_time;
     volatile uint32_t _gyro_samples_available;
     volatile uint8_t  _gyro_samples_needed;
+    float           _delta_time;
+    struct timespec _next_sample_ts;
 
     // support for updating filter at runtime
     uint8_t         _last_filter_hz;

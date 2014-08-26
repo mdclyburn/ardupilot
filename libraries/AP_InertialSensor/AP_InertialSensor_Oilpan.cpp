@@ -1,7 +1,7 @@
 /// -*- tab-width: 4; Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
 #include <AP_HAL.h>
-#if CONFIG_HAL_BOARD == HAL_BOARD_APM1 || CONFIG_HAL_BOARD == HAL_BOARD_LINUX
+#if CONFIG_HAL_BOARD == HAL_BOARD_APM1
 #include "AP_InertialSensor_Oilpan.h"
 
 const extern AP_HAL::HAL& hal;
@@ -112,7 +112,7 @@ bool AP_InertialSensor_Oilpan::update()
     return true;
 }
 
-float AP_InertialSensor_Oilpan::get_delta_time() {
+float AP_InertialSensor_Oilpan::get_delta_time() const {
     return _delta_time_micros * 1.0e-6;
 }
 

@@ -1,5 +1,5 @@
 /*
- *       Example of AC_WPNav library .
+ *       Example of AC_Fence library .
  *       DIYDrones.com
  */
 
@@ -15,6 +15,7 @@
 #include <AP_ADC.h>             // ArduPilot Mega Analog to Digital Converter Library
 #include <AP_ADC_AnalogSource.h>
 #include <AP_Baro.h>            // ArduPilot Mega Barometer Library
+#include <AP_Baro_Glitch.h>     // Baro glitch protection library
 #include <Filter.h>
 #include <AP_Compass.h>         // ArduPilot Mega Magnetometer Library
 #include <AP_Declination.h>
@@ -22,11 +23,14 @@
 #include <AP_AHRS.h>
 #include <AP_Airspeed.h>
 #include <AC_PID.h>             // PID library
-#include <APM_PI.h>             // PID library
+#include <AC_P.h>               // P library
 #include <AP_Buffer.h>          // ArduPilot general purpose FIFO buffer
 #include <AP_InertialNav.h>     // Inertial Navigation library
 #include <AC_Fence.h>           // Fence library
 #include <GCS_MAVLink.h>
+#include <AP_Mission.h>
+#include <StorageManager.h>
+#include <AP_Terrain.h>
 #include <AP_Notify.h>
 #include <AP_Vehicle.h>
 #include <DataFlash.h>
@@ -47,15 +51,15 @@ AP_Baro_BMP085 baro;
 #endif
 
 // GPS declaration
-GPS *gps;
-AP_GPS_Auto auto_gps(&gps);
+AP_GPS gps;
 GPS_Glitch gps_glitch(gps);
+Baro_Glitch baro_glitch(baro);
 
 AP_Compass_HMC5843 compass;
-AP_AHRS_DCM ahrs(ins, gps);
+AP_AHRS_DCM ahrs(ins, baro, gps);
 
 // Inertial Nav declaration
-AP_InertialNav inertial_nav(&ahrs, &baro, gps, gps_glitch);
+AP_InertialNav inertial_nav(ahrs, baro, gps_glitch, baro_glitch);
 
 // Fence
 AC_Fence fence(&inertial_nav);
@@ -67,9 +71,9 @@ void setup()
 
 void loop()
 {
-    // call update function
-    hal.console->printf_P(PSTR("hello"));
-    hal.scheduler->delay(1);
+    // print message to user
+    hal.console->printf_P(PSTR("this example tests compilation only"));
+    hal.scheduler->delay(5000);
 }
 
 AP_HAL_MAIN();

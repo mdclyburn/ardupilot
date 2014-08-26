@@ -40,10 +40,17 @@ class AP_Airspeed
 {
 public:
     // constructor
-    AP_Airspeed(const AP_Vehicle::FixedWing &parms) : 
+    AP_Airspeed(const AP_Vehicle::FixedWing &parms) :
+        _raw_airspeed(0.0f),
+        _airspeed(0.0f),
+        _last_pressure(0.0f),
         _EAS2TAS(1.0f),
         _healthy(false),
+        _hil_set(false),
+        _last_update_ms(0),
         _calibration(parms),
+        _last_saved_ratio(0.0f),
+        _counter(0),
         analog(_pin)
     {
 		AP_Param::setup_object_defaults(this, var_info);
@@ -78,6 +85,9 @@ public:
         return _ratio;
     }
 
+    // get temperature if available
+    bool get_temperature(float &temperature);
+
     // set the airspeed ratio (dimensionless)
     void        set_airspeed_ratio(float ratio) {
         _ratio.set(ratio);
@@ -85,7 +95,7 @@ public:
 
     // return true if airspeed is enabled, and airspeed use is set
     bool        use(void) const {
-        return _enable && _use && _offset > 0 && _healthy;
+        return _enable && _use && fabsf(_offset) > 0 && _healthy;
     }
 
     // return true if airspeed is enabled
@@ -128,8 +138,18 @@ public:
     // return health status of sensor
     bool healthy(void) const { return _healthy; }
 
+    void setHIL(float pressure) { _hil_set=true; _hil_pressure=pressure; };
+
+    // return time in ms of last update
+    uint32_t last_update_ms(void) const { return _last_update_ms; }
+
+    void setHIL(float airspeed, float diff_pressure, float temperature);
+
     static const struct AP_Param::GroupInfo var_info[];
 
+    enum pitot_tube_order { PITOT_TUBE_ORDER_POSITIVE =0, 
+                            PITOT_TUBE_ORDER_NEGATIVE =1, 
+                            PITOT_TUBE_ORDER_AUTO     =2};
 
 private:
     AP_Float        _offset;
@@ -138,11 +158,15 @@ private:
     AP_Int8         _enable;
     AP_Int8         _pin;
     AP_Int8         _autocal;
+    AP_Int8         _tube_order;
     float           _raw_airspeed;
     float           _airspeed;
     float			_last_pressure;
     float           _EAS2TAS;
-    bool		    _healthy;
+    bool		    _healthy:1;
+    bool		    _hil_set:1;
+    float           _hil_pressure;
+    uint32_t        _last_update_ms;
 
     Airspeed_Calibration _calibration;
     float _last_saved_ratio;
@@ -157,6 +181,9 @@ private:
     AP_Airspeed_I2C    digital;
 #endif
 };
+
+// the virtual pin for digital airspeed sensors
+#define AP_AIRSPEED_I2C_PIN 65
 
 #endif // __AP_AIRSPEED_H__
 

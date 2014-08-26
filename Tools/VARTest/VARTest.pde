@@ -14,6 +14,7 @@
 #include <AP_HAL.h>
 #include <AP_Menu.h>
 #include <AP_Param.h>
+#include <StorageManager.h>
 #include <AP_GPS.h>         // ArduPilot GPS library
 #include <AP_Baro.h>        // ArduPilot barometer library
 #include <AP_Compass.h>     // ArduPilot Mega Magnetometer Library
@@ -22,6 +23,7 @@
 #include <AP_ADC_AnalogSource.h>
 #include <AP_InertialSensor.h> // Inertial Sensor Library
 #include <AP_AHRS.h>         // ArduPilot Mega DCM Library
+#include <AP_NavEKF.h>
 #include <PID.h>            // PID library
 #include <RC_Channel.h>     // RC Channel Library
 #include <AP_RangeFinder.h>     // Range finder library
@@ -31,8 +33,13 @@
 #include <AP_Camera.h>          // Photo or video camera
 #include <AP_Airspeed.h>
 #include <AP_Vehicle.h>
+#include <AP_Mission.h>
+#include <AP_Rally.h>
+#include <AP_Terrain.h>
+#include <AP_BattMonitor.h>
 #include <AP_SpdHgtControl.h>
 #include <memcheck.h>
+#include <AP_RCMapper.h>
 
 #include <APM_OBC.h>
 #include <APM_Control.h>
@@ -59,17 +66,16 @@ const AP_HAL::HAL& hal = AP_HAL_BOARD_DRIVER;
 // constructor runs before the constructors of the other AP_Param
 // variables
 extern const AP_Param::Info var_info[];
-AP_Param param_loader(var_info, WP_START_BYTE);
+AP_Param param_loader(var_info);
 
 static Parameters g;
 
-static GPS         *g_gps;
-AP_GPS_Auto     g_gps_driver(&g_gps);
+static AP_GPS gps;
 AP_InertialSensor_MPU6000 ins;
-AP_AHRS_DCM  ahrs(ins, g_gps);
+AP_Baro_HIL      barometer;
+AP_AHRS_DCM  ahrs(ins, barometer, gps);
 
 static AP_Compass_HIL compass;
-AP_Baro_HIL      barometer;
 SITL					sitl;
 
 #define SERIAL0_BAUD 115200
@@ -131,8 +137,7 @@ void setup() {
 	ofs.x += 1.1;
 	ofs.y += 1.2;
 	ofs.z += 1.3;
-	compass.set_offsets(ofs);
-	compass.save_offsets();
+	compass.set_and_save_offsets(0, ofs);
 	cliSerial->printf_P(PSTR("Compass: %f %f %f\n"),
 					ofs.x, ofs.y, ofs.z);
 
