@@ -956,8 +956,8 @@ void log_depth()
 	// e.g.: gcs_send_text_fmt(PSTR("Bah. %d"), 0);
 
 	// Get last GPS data.
-	int lat = g_gps->latitude;
-	int lng = g_gps->longitude;
+	int32_t lat = g_gps->latitude;
+	int32_t lng = g_gps->longitude;
 
 	// Ensure GPS is available.
 	// Reference /libraries/AP_GPS/GPS.h:35
