@@ -785,6 +785,8 @@ static void one_second_loop(void)
         }
         counter = 0;
     }
+
+	log_depth();
 }
 
 static void update_GPS_50Hz(void)
@@ -940,6 +942,38 @@ static void update_navigation()
         }
         break;
 	}
+}
+
+void log_depth()
+{
+	// Print out data out to telemetry log.
+	// e.g.: gcs_send_text_P(SEVERITY_LOW, PSTR("Bah."));
+	// e.g.: gcs_send_text_fmt(PSTR("Bah. %d"), 0);
+
+	// Get last GPS data.
+	int32_t lat = g_gps->latitude;
+	int32_t lng = g_gps->longitude;
+
+	// Ensure GPS is available.
+	// Reference /libraries/AP_GPS/GPS.h:35
+	GPS::GPS_Status status = g_gps->status();
+	switch(status)
+	{
+		case GPS::NO_GPS:
+		case GPS::NO_FIX:
+			gcs_send_text_fmt(PSTR("DEPTH %d %d %d"), 0, 0, 0);
+			break;
+		case GPS::GPS_OK_FIX_2D:
+		case GPS::GPS_OK_FIX_3D:
+			// Hardware unavailable for testing at the moment. Data will come
+			// out as 'DEPTH <depth> <latitude> <longitude>'.
+			gcs_send_text_fmt(PSTR("DEPTH %d %d %d"), 0, lat, lng);
+			break;
+		default:
+			break;
+	}
+
+	return;  
 }
 
 AP_HAL_MAIN();
