@@ -953,8 +953,8 @@ void log_depth()
 	// Ensure GPS is available.
 	AP_GPS::GPS_Status status = gps.status();
 
-	double lat = current_loc.lat / 10000000;
-	double lng = current_loc.lng / 10000000;
+	double lat = (double) current_loc.lat / 10000000;
+	double lng = (double) current_loc.lng / 10000000;
 
 	switch(status)
 	{
