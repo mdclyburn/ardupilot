@@ -953,8 +953,8 @@ void log_depth()
 	// Ensure GPS is available.
 	AP_GPS::GPS_Status status = gps.status();
 
-	double lat = current_loc.lat * 10000000;
-	double lng = current_loc.lng * 10000000;
+	double lat = current_loc.lat / 10000000;
+	double lng = current_loc.lng / 10000000;
 
 	switch(status)
 	{
@@ -966,7 +966,7 @@ void log_depth()
 		case AP_GPS::GPS_OK_FIX_3D:
 			// Hardware unavailable for testing at the moment. Data will come
 			// out as 'DEPTH <depth> <latitude> <longitude>'.
-			gcs_send_text_fmt(PSTR("DEPTH %lf %lf %lf"), 0, lat, lng);
+			gcs_send_text_fmt(PSTR("DEPTH <depth> %lf %lf"), lat, lng);
 			break;
 		default:
 			break;
