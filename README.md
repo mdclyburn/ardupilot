@@ -1,3 +1,9 @@
+# APMboat Project
+
+This project was forked from the ardupilot project here on GitHub.
+This is a project that I am currently working on that involves modifying the code for the APMrover and adapting it to work with a boat.
+In addition, this custom firmware will allow for the receiving of data over a serial connection via the unused UART2 port.
+
 # ArduPilot Project
 
 You can find lots of development information at the [ArduPilot development site](http://dev.ardupilot.com)
