@@ -117,7 +117,7 @@ const AP_Param::GroupInfo AP_AHRS::var_info[] PROGMEM = {
     // @Description: This controls whether the NavEKF Kalman filter is used for attitude and position estimation
     // @Values: 0:Disabled,1:Enabled
     // @User: Advanced
-    AP_GROUPINFO("EKF_USE",  13, AP_AHRS, _ekf_use, 0),
+    AP_GROUPINFO("EKF_USE",  13, AP_AHRS, _ekf_use, AHRS_EKF_USE_DEFAULT),
 #endif
 
     AP_GROUPEND
@@ -126,7 +126,7 @@ const AP_Param::GroupInfo AP_AHRS::var_info[] PROGMEM = {
 // return airspeed estimate if available
 bool AP_AHRS::airspeed_estimate(float *airspeed_ret) const
 {
-	if (_airspeed && _airspeed->use()) {
+	if (airspeed_sensor_enabled()) {
 		*airspeed_ret = _airspeed->get_airspeed();
 		if (_wind_max > 0 && _gps.status() >= AP_GPS::GPS_OK_FIX_2D) {
                     // constrain the airspeed by the ground speed
@@ -238,12 +238,30 @@ void AP_AHRS::update_trig(void)
     _cos_yaw = constrain_float(yaw_vector.x, -1.0, 1.0);
 
     // cos_roll, cos_pitch
-    _cos_pitch = safe_sqrt(1 - (temp.c.x * temp.c.x));
-    _cos_roll = temp.c.z / _cos_pitch;
+    float cx2 = temp.c.x * temp.c.x;
+    if (cx2 >= 1.0f) {
+        _cos_pitch = 0;
+        _cos_roll = 1.0f;
+    } else {
+        _cos_pitch = safe_sqrt(1 - cx2);
+        _cos_roll = temp.c.z / _cos_pitch;
+    }
     _cos_pitch = constrain_float(_cos_pitch, 0, 1.0);
     _cos_roll = constrain_float(_cos_roll, -1.0, 1.0); // this relies on constrain_float() of infinity doing the right thing,which it does do in avr-libc
 
     // sin_roll, sin_pitch
     _sin_pitch = -temp.c.x;
     _sin_roll = temp.c.y / _cos_pitch;
+}
+
+/*
+  update the centi-degree values
+ */
+void AP_AHRS::update_cd_values(void)
+{
+    roll_sensor  = degrees(roll) * 100;
+    pitch_sensor = degrees(pitch) * 100;
+    yaw_sensor   = degrees(yaw) * 100;
+    if (yaw_sensor < 0)
+        yaw_sensor += 36000;
 }

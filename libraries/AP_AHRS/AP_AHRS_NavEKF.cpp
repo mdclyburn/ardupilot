@@ -50,23 +50,40 @@ const Vector3f &AP_AHRS_NavEKF::get_gyro_drift(void) const
     return _gyro_bias;
 }
 
+// reset the current gyro drift estimate
+//  should be called if gyro offsets are recalculated
+void AP_AHRS_NavEKF::reset_gyro_drift(void)
+{
+    // update DCM
+    AP_AHRS_DCM::reset_gyro_drift();
+
+    // reset the EKF gyro bias states
+    EKF.resetGyroBias();
+}
+
 void AP_AHRS_NavEKF::update(void)
 {
+    // we need to restore the old DCM attitude values as these are
+    // used internally in DCM to calculate error values for gyro drift
+    // correction
+    roll = _dcm_attitude.x;
+    pitch = _dcm_attitude.y;
+    yaw = _dcm_attitude.z;
+    update_cd_values();
+
     AP_AHRS_DCM::update();
 
     // keep DCM attitude available for get_secondary_attitude()
     _dcm_attitude(roll, pitch, yaw);
 
     if (!ekf_started) {
-        // if we have a GPS lock we can start the EKF
-        if (get_gps().status() >= AP_GPS::GPS_OK_FIX_3D) {
-            if (start_time_ms == 0) {
-                start_time_ms = hal.scheduler->millis();
-            }
-            if (hal.scheduler->millis() - start_time_ms > startup_delay_ms) {
-                ekf_started = true;
-                EKF.InitialiseFilterDynamic();
-            }
+        // wait 10 seconds
+        if (start_time_ms == 0) {
+            start_time_ms = hal.scheduler->millis();
+        }
+        if (hal.scheduler->millis() - start_time_ms > startup_delay_ms) {
+            ekf_started = true;
+            EKF.InitialiseFilterDynamic();
         }
     }
     if (ekf_started) {
@@ -78,11 +95,8 @@ void AP_AHRS_NavEKF::update(void)
             roll  = eulers.x;
             pitch = eulers.y;
             yaw   = eulers.z;
-            roll_sensor  = degrees(roll) * 100;
-            pitch_sensor = degrees(pitch) * 100;
-            yaw_sensor   = degrees(yaw) * 100;
-            if (yaw_sensor < 0)
-                yaw_sensor += 36000;
+
+            update_cd_values();
             update_trig();
 
             // keep _gyro_bias for get_gyro_drift()
@@ -102,8 +116,36 @@ void AP_AHRS_NavEKF::update(void)
                 _gyro_estimate /= healthy_count;
             }
             _gyro_estimate += _gyro_bias;
+
+            // update _accel_ef_ekf
+            for (uint8_t i=0; i<_ins.get_accel_count(); i++) {
+                if (_ins.get_accel_health(i)) {
+                    _accel_ef_ekf[i] = _dcm_matrix * _ins.get_accel(i);
+                }
+            }
+
+            // update _accel_ef_ekf_blended
+            EKF.getAccelNED(_accel_ef_ekf_blended);
         }
     }
+}
+
+// accelerometer values in the earth frame in m/s/s
+const Vector3f &AP_AHRS_NavEKF::get_accel_ef(uint8_t i) const
+{
+    if(!using_EKF()) {
+        return AP_AHRS_DCM::get_accel_ef(i);
+    }
+    return _accel_ef_ekf[i];
+}
+
+// blended accelerometer values in the earth frame in m/s/s
+const Vector3f &AP_AHRS_NavEKF::get_accel_ef_blended(void) const
+{
+    if(!using_EKF()) {
+        return AP_AHRS_DCM::get_accel_ef_blended();
+    }
+    return _accel_ef_ekf_blended;
 }
 
 void AP_AHRS_NavEKF::reset(bool recover_eulers)
@@ -124,9 +166,13 @@ void AP_AHRS_NavEKF::reset_attitude(const float &_roll, const float &_pitch, con
 }
 
 // dead-reckoning support
-bool AP_AHRS_NavEKF::get_position(struct Location &loc)
+bool AP_AHRS_NavEKF::get_position(struct Location &loc) const
 {
-    if (using_EKF() && EKF.getLLH(loc)) {
+    Vector3f ned_pos;
+    if (using_EKF() && EKF.getLLH(loc) && EKF.getPosNED(ned_pos)) {
+        // fixup altitude using relative position from AHRS home, not
+        // EKF origin
+        loc.alt = get_home().alt - ned_pos.z*100;
         return true;
     }
     return AP_AHRS_DCM::get_position(loc);
@@ -258,12 +304,37 @@ bool AP_AHRS_NavEKF::using_EKF(void) const
 /*
   check if the AHRS subsystem is healthy
 */
-bool AP_AHRS_NavEKF::healthy(void)
+bool AP_AHRS_NavEKF::healthy(void) const
 {
     if (_ekf_use) {
         return ekf_started && EKF.healthy();
     }
     return AP_AHRS_DCM::healthy();    
+}
+
+// true if the AHRS has completed initialisation
+bool AP_AHRS_NavEKF::initialised(void) const
+{
+    // initialisation complete 10sec after ekf has started
+    return (ekf_started && (hal.scheduler->millis() - start_time_ms > AP_AHRS_NAVEKF_SETTLE_TIME_MS));
+};
+
+// write optical flow data to EKF
+void  AP_AHRS_NavEKF::writeOptFlowMeas(uint8_t &rawFlowQuality, Vector2f &rawFlowRates, Vector2f &rawGyroRates, uint32_t &msecFlowMeas, uint8_t &rangeHealth, float &rawSonarRange)
+{
+    EKF.writeOptFlowMeas(rawFlowQuality, rawFlowRates, rawGyroRates, msecFlowMeas, rangeHealth, rawSonarRange);
+}
+
+// inhibit GPS useage
+uint8_t AP_AHRS_NavEKF::setInhibitGPS(void)
+{
+    return EKF.setInhibitGPS();
+}
+
+// get speed limit
+void AP_AHRS_NavEKF::getEkfControlLimits(float &ekfGndSpdLimit, float &ekfNavVelGainScaler)
+{
+    EKF.getEkfControlLimits(ekfGndSpdLimit,ekfNavVelGainScaler);
 }
 
 #endif // AP_AHRS_NAVEKF_AVAILABLE

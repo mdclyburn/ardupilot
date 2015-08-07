@@ -30,7 +30,9 @@
 
 #define BUZZER_ARMING_BUZZ_MS   3000    // arming buzz length in milliseconds (i.e. 3 seconds)
 
-class Buzzer
+#include "NotifyDevice.h"
+
+class Buzzer: public NotifyDevice
 {
 public:
     /// Constructor
@@ -42,7 +44,7 @@ public:
     {}
 
     /// init - initialise the buzzer
-    void init(void);
+    bool init(void);
 
     /// update - updates buzzer according to timed_updated.  Should be called at 50Hz
     void update();
@@ -74,7 +76,6 @@ private:
         uint8_t failsafe_battery    : 1;    // 1 if battery failsafe has triggered
         uint8_t failsafe_gps        : 1;    // 1 if gps failsafe
         uint8_t baro_glitching     : 1;    // 1 if baro alt is glitching
-        uint8_t arming_failed      : 1;    // 0 = failing checks, 1 = passed
         uint8_t ekf_bad            : 1;    // 1 if ekf position has gone bad
     } _flags;
 

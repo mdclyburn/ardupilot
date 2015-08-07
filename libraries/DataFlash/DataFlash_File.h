@@ -58,6 +58,7 @@ private:
     uint32_t _read_offset;
     uint32_t _write_offset;
     volatile bool _initialised;
+    volatile bool _open_error;
     const char *_log_directory;
 
     /*
@@ -67,7 +68,7 @@ private:
 
     // write buffer
     uint8_t *_writebuf;
-    const uint16_t _writebuf_size;
+    uint16_t _writebuf_size;
     const uint16_t _writebuf_chunk;
     volatile uint16_t _writebuf_head;
     volatile uint16_t _writebuf_tail;

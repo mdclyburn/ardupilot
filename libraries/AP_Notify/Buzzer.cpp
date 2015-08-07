@@ -23,11 +23,11 @@
 
 extern const AP_HAL::HAL& hal;
 
-void Buzzer::init()
+bool Buzzer::init()
 {
     // return immediately if disabled
     if (!AP_Notify::flags.external_leds) {
-        return;
+        return false;
     }
 
     // setup the pin and ensure it's off
@@ -38,6 +38,7 @@ void Buzzer::init()
     // warning in plane and rover on every boot
     _flags.armed = AP_Notify::flags.armed;
     _flags.failsafe_battery = AP_Notify::flags.failsafe_battery;
+    return true;
 }
 
 // update - updates led according to timed_updated.  Should be called at 50Hz
@@ -46,6 +47,12 @@ void Buzzer::update()
     // return immediately if disabled
     if (!AP_Notify::flags.external_leds) {
         return;
+    }
+
+    // check for arming failed event
+    if (AP_Notify::events.arming_failed) {
+        // arming failed buzz
+        play_pattern(SINGLE_BUZZ);
     }
 
     // reduce 50hz call down to 10hz
@@ -186,16 +193,6 @@ void Buzzer::update()
             play_pattern(ARMING_BUZZ);
         }else{
             // single buzz when disarmed
-            play_pattern(SINGLE_BUZZ);
-        }
-        return;
-    }
-
-    // check arming failed
-    if (_flags.arming_failed != AP_Notify::flags.arming_failed) {
-        _flags.arming_failed = AP_Notify::flags.arming_failed;
-        if (_flags.arming_failed) {
-            // arming failed buzz
             play_pattern(SINGLE_BUZZ);
         }
         return;

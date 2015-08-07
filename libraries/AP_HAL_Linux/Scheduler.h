@@ -10,6 +10,7 @@
 #include <pthread.h>
 
 #define LINUX_SCHEDULER_MAX_TIMER_PROCS 10
+#define LINUX_SCHEDULER_MAX_IO_PROCS 10
 
 class Linux::LinuxScheduler : public AP_HAL::Scheduler {
 public:
@@ -61,7 +62,7 @@ private:
     uint8_t _num_timer_procs;
     volatile bool _in_timer_proc;
 
-    AP_HAL::MemberProc _io_proc[LINUX_SCHEDULER_MAX_TIMER_PROCS];
+    AP_HAL::MemberProc _io_proc[LINUX_SCHEDULER_MAX_IO_PROCS];
     uint8_t _num_io_procs;
     volatile bool _in_io_proc;
 
@@ -71,11 +72,13 @@ private:
     pthread_t _io_thread_ctx;
     pthread_t _rcin_thread_ctx;
     pthread_t _uart_thread_ctx;
+    pthread_t _tonealarm_thread_ctx;
 
     void *_timer_thread(void);
     void *_io_thread(void);
     void *_rcin_thread(void);
     void *_uart_thread(void);
+    void *_tonealarm_thread(void);
 
     void _run_timers(bool called_from_timer_thread);
     void _run_io(void);
@@ -84,6 +87,7 @@ private:
     uint64_t stopped_clock_usec;
 
     LinuxSemaphore _timer_semaphore;
+    LinuxSemaphore _io_semaphore;
 };
 
 #endif // CONFIG_HAL_BOARD

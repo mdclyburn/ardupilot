@@ -11,6 +11,7 @@
 #include <AP_HAL_PX4.h>
 #include <AP_HAL_Empty.h>
 #include <AP_Common.h>
+#include <AP_Scheduler.h>
 #include <AP_Baro.h>
 #include <AP_ADC.h>
 #include <AP_GPS.h>
@@ -35,6 +36,7 @@
 #include <AP_BattMonitor.h>
 #include <AP_Rally.h>
 #include <AP_ADC_AnalogSource.h>
+#include <AP_OpticalFlow.h>
 
 const AP_HAL::HAL& hal = AP_HAL_BOARD_DRIVER;
 

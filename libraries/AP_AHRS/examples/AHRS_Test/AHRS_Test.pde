@@ -29,33 +29,36 @@
 #include <AP_Notify.h>
 #include <AP_Vehicle.h>
 #include <DataFlash.h>
+#include <AP_NavEKF.h>
+#include <AP_Rally.h>
+#include <AP_Scheduler.h>
 
 #include <AP_HAL_AVR.h>
 #include <AP_HAL_AVR_SITL.h>
 #include <AP_HAL_Empty.h>
+#include <AP_HAL_PX4.h>
+#include <AP_BattMonitor.h>
+#include <AP_SerialManager.h>
+#include <RC_Channel.h>
 
 const AP_HAL::HAL& hal = AP_HAL_BOARD_DRIVER;
 
 // INS and Baro declaration
-#if CONFIG_HAL_BOARD == HAL_BOARD_APM2
-AP_InertialSensor_MPU6000 ins;
-AP_Baro_MS5611 baro(&AP_Baro_MS5611::spi);
-#elif CONFIG_HAL_BOARD == HAL_BOARD_APM1
-AP_ADC_ADS7844 adc;
-AP_InertialSensor_Oilpan ins( &adc );
-AP_Baro_BMP085 baro;
-#else
-AP_InertialSensor_HIL ins;
+AP_InertialSensor ins;
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_APM1
+AP_ADC_ADS7844 apm1_adc;
 #endif
 
 AP_Compass_HMC5843 compass;
 
 AP_GPS gps;
+AP_Baro baro;
+AP_SerialManager serial_manager;
 
 // choose which AHRS system to use
 AP_AHRS_DCM  ahrs(ins, baro, gps);
 
-AP_Baro_HIL barometer;
 
 
 #define HIGH 1
@@ -75,6 +78,7 @@ void setup(void)
     ins.init_accel();
 
     ahrs.init();
+    serial_manager.init();
 
     if( compass.init() ) {
         hal.console->printf("Enabling compass\n");
@@ -82,7 +86,7 @@ void setup(void)
     } else {
         hal.console->printf("No compass detected\n");
     }
-    gps.init(NULL);
+    gps.init(NULL, serial_manager);
 }
 
 void loop(void)

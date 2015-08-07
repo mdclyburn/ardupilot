@@ -1,6 +1,6 @@
 /// -*- tab-width: 4; Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
-#define THISFIRMWARE "AntennaTracker V0.1"
+#define THISFIRMWARE "AntennaTracker V0.4"
 /*
    Lead developers: Matthew Ridley and Andrew Tridgell
  
@@ -46,6 +46,7 @@
 #include <memcheck.h>
 
 #include <GCS_MAVLink.h>    // MAVLink GCS definitions
+#include <AP_SerialManager.h>   // Serial manager library
 #include <AP_Declination.h> // ArduPilot Mega Declination Helper Library
 #include <DataFlash.h>
 #include <SITL.h>
@@ -62,6 +63,7 @@
 #include <AP_Airspeed.h>
 #include <RC_Channel.h>
 #include <AP_BoardConfig.h>
+#include <AP_OpticalFlow.h>
 
 // Configuration
 #include "config.h"
@@ -102,20 +104,6 @@ static AP_Scheduler scheduler;
 // notification object for LEDs, buzzers etc
 static AP_Notify notify;
 
-// tracking status for MAVLink
-static struct {
-    float bearing;
-    float distance;
-    float pitch;
-    float altitude_difference;
-    float altitude_offset;
-    bool manual_control_yaw:1;
-    bool manual_control_pitch:1;
-    bool need_altitude_calibration:1;
-    bool scan_reverse_pitch:1;
-    bool scan_reverse_yaw:1;
-} nav_status;
-
 static uint32_t start_time_ms;
 
 static bool usb_connected;
@@ -130,21 +118,7 @@ void gcs_send_text_fmt(const prog_char_t *fmt, ...);
 ////////////////////////////////////////////////////////////////////////////////
 static AP_GPS gps;
 
-#if CONFIG_BARO == HAL_BARO_BMP085
-static AP_Baro_BMP085 barometer;
-#elif CONFIG_BARO == HAL_BARO_PX4
-static AP_Baro_PX4 barometer;
-#elif CONFIG_BARO == HAL_BARO_VRBRAIN
-static AP_Baro_VRBRAIN barometer;
-#elif CONFIG_BARO == HAL_BARO_HIL
-static AP_Baro_HIL barometer;
-#elif CONFIG_BARO == HAL_BARO_MS5611
-static AP_Baro_MS5611 barometer(&AP_Baro_MS5611::i2c);
-#elif CONFIG_BARO == HAL_BARO_MS5611_SPI
-static AP_Baro_MS5611 barometer(&AP_Baro_MS5611::spi);
-#else
- #error Unrecognized CONFIG_BARO setting
-#endif
+static AP_Baro barometer;
 
 #if CONFIG_COMPASS == HAL_COMPASS_PX4
 static AP_Compass_PX4 compass;
@@ -154,33 +128,17 @@ static AP_Compass_VRBRAIN compass;
 static AP_Compass_HMC5843 compass;
 #elif CONFIG_COMPASS == HAL_COMPASS_HIL
 static AP_Compass_HIL compass;
+#elif CONFIG_COMPASS == HAL_COMPASS_AK8963
+static AP_Compass_AK8963_MPU9250 compass;
 #else
  #error Unrecognized CONFIG_COMPASS setting
 #endif
 
-#if CONFIG_INS_TYPE == HAL_INS_OILPAN || CONFIG_HAL_BOARD == HAL_BOARD_APM1
+#if CONFIG_HAL_BOARD == HAL_BOARD_APM1
 AP_ADC_ADS7844 apm1_adc;
 #endif
 
-#if CONFIG_INS_TYPE == HAL_INS_MPU6000
-AP_InertialSensor_MPU6000 ins;
-#elif CONFIG_INS_TYPE == HAL_INS_PX4
-AP_InertialSensor_PX4 ins;
-#elif CONFIG_INS_TYPE == HAL_INS_VRBRAIN
-AP_InertialSensor_VRBRAIN ins;
-#elif CONFIG_INS_TYPE == HAL_INS_HIL
-AP_InertialSensor_HIL ins;
-#elif CONFIG_INS_TYPE == HAL_INS_OILPAN
-AP_InertialSensor_Oilpan ins( &apm1_adc );
-#elif CONFIG_INS_TYPE == HAL_INS_FLYMAPLE
-AP_InertialSensor_Flymaple ins;
-#elif CONFIG_INS_TYPE == HAL_INS_L3G4200D
-AP_InertialSensor_L3G4200D ins;
-#elif CONFIG_INS_TYPE == HAL_INS_MPU9250
-AP_InertialSensor_MPU9250 ins;
-#else
-  #error Unrecognised CONFIG_INS_TYPE setting.
-#endif // CONFIG_INS_TYPE
+AP_InertialSensor ins;
 
 // Inertial Navigation EKF
 #if AP_AHRS_NAVEKF_AVAILABLE
@@ -196,18 +154,15 @@ SITL sitl;
 /**
    antenna control channels
  */
-static RC_Channel channel_yaw(CH_1);
-static RC_Channel channel_pitch(CH_2);
+static RC_Channel channel_yaw(CH_YAW);
+static RC_Channel channel_pitch(CH_PITCH);
 
 ////////////////////////////////////////////////////////////////////////////////
 // GCS selection
 ////////////////////////////////////////////////////////////////////////////////
+static AP_SerialManager serial_manager;
 static const uint8_t num_gcs = MAVLINK_COMM_NUM_BUFFERS;
 static GCS_MAVLINK gcs[MAVLINK_COMM_NUM_BUFFERS];
-
-// If proxy_mode is enabled, uartC is connected to a remote vehicle,
-// not gcs[1]
-static GCS_MAVLINK proxy_vehicle;
 
 // board specific config
 static AP_BoardConfig BoardConfig;
@@ -222,6 +177,45 @@ static struct   Location current_loc;
 // There are multiple states defined such as MANUAL, FBW-A, AUTO
 static enum ControlMode control_mode  = INITIALISING;
 
+////////////////////////////////////////////////////////////////////////////////
+// Vehicle state
+////////////////////////////////////////////////////////////////////////////////
+static struct {
+    bool location_valid;    // true if we have a valid location for the vehicle
+    Location location;      // lat, long in degrees * 10^7; alt in meters * 100
+    Location location_estimate; // lat, long in degrees * 10^7; alt in meters * 100
+    uint32_t last_update_us;    // last position update in micxroseconds
+    uint32_t last_update_ms;    // last position update in milliseconds
+    float heading;          // last known direction vehicle is moving
+    float ground_speed;     // vehicle's last known ground speed in m/s
+} vehicle;
+
+////////////////////////////////////////////////////////////////////////////////
+// Navigation controller state
+////////////////////////////////////////////////////////////////////////////////
+static struct {
+    float bearing;                  // bearing to vehicle in centi-degrees
+    float distance;                 // distance to vehicle in meters
+    float pitch;                    // pitch to vehicle in degrees (positive means vehicle is above tracker, negative means below)
+    float altitude_difference;      // altitude difference between tracker and vehicle in meters.  positive value means vehicle is above tracker
+    float altitude_offset;          // offset in meters which is added to tracker altitude to align altitude measurements with vehicle's barometer
+    bool manual_control_yaw         : 1;// true if tracker yaw is under manual control
+    bool manual_control_pitch       : 1;// true if tracker pitch is manually controlled
+    bool need_altitude_calibration  : 1;// true if tracker altitude has not been determined (true after startup)
+    bool scan_reverse_pitch         : 1;// controls direction of pitch movement in SCAN mode
+    bool scan_reverse_yaw           : 1;// controls direction of yaw movement in SCAN mode
+} nav_status;
+
+////////////////////////////////////////////////////////////////////////////////
+// Servo state
+////////////////////////////////////////////////////////////////////////////////
+static struct {
+    bool yaw_lower      : 1;    // true if yaw servo has been limited from moving to a lower position (i.e. position or rate limited)
+    bool yaw_upper      : 1;    // true if yaw servo has been limited from moving to a higher position (i.e. position or rate limited)
+    bool pitch_lower    : 1;    // true if pitch servo has been limited from moving to a lower position (i.e. position or rate limited)
+    bool pitch_upper    : 1;    // true if pitch servo has been limited from moving to a higher position (i.e. position or rate limited)
+} servo_limit;
+
 /*
   scheduler table - all regular tasks apart from the fast_loop()
   should be listed here, along with how often they should be called
@@ -230,6 +224,7 @@ static enum ControlMode control_mode  = INITIALISING;
  */
 static const AP_Scheduler::Task scheduler_tasks[] PROGMEM = {
     { update_ahrs,            1,   1000 },
+    { read_radio,             1,    200 },
     { update_tracking,        1,   1000 },
     { update_GPS,             5,   4000 },
     { update_compass,         5,   1500 },
@@ -257,9 +252,9 @@ void setup()
     // load the default values of variables listed in var_info[]
     AP_Param::setup_sketch_defaults();
 
-    // arduplane does not use arming nor pre-arm checks
-    AP_Notify::flags.armed = true;
+    // antenna tracker does not use pre-arm checks or battery failsafe
     AP_Notify::flags.pre_arm_check = true;
+    AP_Notify::flags.pre_arm_gps_check = true;
     AP_Notify::flags.failsafe_battery = false;
 
     notify.init(false);
@@ -275,9 +270,7 @@ void setup()
 void loop()
 {
     // wait for an INS sample
-    if (!ins.wait_for_sample(1000)) {
-        return;
-    }
+    ins.wait_for_sample();
 
     // tell the scheduler one tick has passed
     scheduler.tick();
@@ -296,10 +289,13 @@ static void one_second_loop()
     // sync MAVLink system ID
     mavlink_system.sysid = g.sysid_this_mav;
 
+    // updated armed/disarmed status LEDs
+    update_armed_disarmed();
+
     static uint8_t counter;
     counter++;
 
-    if (counter >= 60) {                                               
+    if (counter >= 60) {
         if(g.compass_enabled) {
             compass.save_offsets();
         }

@@ -86,6 +86,13 @@ private:
         uint32_t res3;
         uint32_t res4;
     };
+    struct PACKED ubx_cfg_sbas {
+        uint8_t mode;
+        uint8_t usage;
+        uint8_t maxSBAS;
+        uint8_t scanmode2;
+        uint32_t scanmode1;
+    };
 
     struct PACKED ubx_nav_posllh {
         uint32_t time;                                  // GPS msToW
@@ -187,6 +194,12 @@ private:
         uint32_t postStatus;
         uint32_t reserved2;
     };
+    struct PACKED ubx_nav_svinfo_header {
+        uint32_t itow;
+        uint8_t numCh;
+        uint8_t globalFlags;
+        uint16_t reserved;
+    };
     // Receive buffer
     union PACKED {
         ubx_nav_posllh posllh;
@@ -197,6 +210,8 @@ private:
         ubx_mon_hw_60 mon_hw_60;
         ubx_mon_hw_68 mon_hw_68;
         ubx_mon_hw2 mon_hw2;
+        ubx_cfg_sbas sbas;
+        ubx_nav_svinfo_header svinfo_header;
         uint8_t bytes[];
     } _buffer;
 
@@ -217,8 +232,10 @@ private:
         MSG_CFG_RATE = 0x08,
         MSG_CFG_SET_RATE = 0x01,
         MSG_CFG_NAV_SETTINGS = 0x24,
+        MSG_CFG_SBAS = 0x16,
         MSG_MON_HW = 0x09,
-        MSG_MON_HW2 = 0x0B
+        MSG_MON_HW2 = 0x0B,
+        MSG_NAV_SVINFO = 0x30
     };
     enum ubs_nav_fix_type {
         FIX_NONE = 0,
@@ -230,6 +247,13 @@ private:
     };
     enum ubx_nav_status_bits {
         NAV_STATUS_FIX_VALID = 1
+    };
+    enum ubx_hardware_version {
+        ANTARIS = 0,
+        UBLOX_5,
+        UBLOX_6,
+        UBLOX_7,
+        UBLOX_M8
     };
 
     // Packet checksum accumulators
@@ -271,14 +295,17 @@ private:
     void 	    _configure_navigation_rate(uint16_t rate_ms);
     void        _configure_message_rate(uint8_t msg_class, uint8_t msg_id, uint8_t rate);
     void        _configure_gps(void);
+    void        _configure_sbas(bool enable);
     void        _update_checksum(uint8_t *data, uint8_t len, uint8_t &ck_a, uint8_t &ck_b);
     void        _send_message(uint8_t msg_class, uint8_t msg_id, void *msg, uint8_t size);
     void		send_next_rate_update(void);
+    void        _request_version(void);
 
     void unexpected_message(void);
     void write_logging_headers(void);
     void log_mon_hw(void);
     void log_mon_hw2(void);
+    void log_accuracy(void);
 };
 
 #endif // __AP_GPS_UBLOX_H__

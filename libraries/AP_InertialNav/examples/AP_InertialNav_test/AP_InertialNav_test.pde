@@ -31,20 +31,21 @@
 #include <AP_Terrain.h>
 #include <AP_Notify.h>
 #include <AP_InertialNav.h>
+#include <AP_NavEKF.h>
+#include <AP_Nav_Common.h>
+#include <AP_BattMonitor.h>     // battery monitor library
+#include <AP_SerialManager.h>   // Serial manager library
 
 const AP_HAL::HAL& hal = AP_HAL_BOARD_DRIVER;
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_APM2
+AP_InertialSensor ins;
+static AP_SerialManager serial_manager;
 
-AP_InertialSensor_MPU6000 ins;
-AP_Baro_MS5611 baro(&AP_Baro_MS5611::spi);
-
-#else
-
-AP_ADC_ADS7844 adc;
-AP_InertialSensor_Oilpan ins(&adc);
-AP_Baro_BMP085 baro;
+#if CONFIG_HAL_BOARD == HAL_BOARD_APM1
+AP_ADC_ADS7844 apm1_adc;
 #endif
+
+AP_Baro baro;
 
 AP_GPS gps;
 GPS_Glitch   gps_glitch(gps);
@@ -61,7 +62,8 @@ void setup(void)
 {
     hal.console->println_P(PSTR("AP_InertialNav test startup..."));
 
-    gps.init(NULL);
+    serial_manager.init();
+    gps.init(NULL, serial_manager);
 
     ins.init(AP_InertialSensor::COLD_START, 
 			 AP_InertialSensor::RATE_100HZ);

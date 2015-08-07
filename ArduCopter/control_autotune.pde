@@ -53,10 +53,10 @@
 #define AUTOTUNE_PI_RATIO_FOR_TESTING      0.1f    // I is set 10x smaller than P during testing
 #define AUTOTUNE_RP_RATIO_FINAL            1.0f    // I is set 1x P after testing
 #define AUTOTUNE_RD_MIN                  0.002f    // minimum Rate D value
-#define AUTOTUNE_RD_MAX                  0.015f    // maximum Rate D value
+#define AUTOTUNE_RD_MAX                  0.020f    // maximum Rate D value
 #define AUTOTUNE_RP_MIN                   0.01f    // minimum Rate P value
-#define AUTOTUNE_RP_MAX                   0.25f    // maximum Rate P value
-#define AUTOTUNE_SP_MAX                   15.0f    // maximum Stab P value
+#define AUTOTUNE_RP_MAX                   0.35f    // maximum Rate P value
+#define AUTOTUNE_SP_MAX                   20.0f    // maximum Stab P value
 #define AUTOTUNE_SUCCESS_COUNT                4    // how many successful iterations we need to freeze at current gains
 
 // Auto Tune message ids for ground station
@@ -115,9 +115,11 @@ static float    orig_pitch_rp = 0, orig_pitch_ri, orig_pitch_rd, orig_pitch_sp; 
 static float    tune_roll_rp, tune_roll_rd, tune_roll_sp;                   // currently being tuned parameter values
 static float    tune_pitch_rp, tune_pitch_rd, tune_pitch_sp;                // currently being tuned parameter values
 
-// autotune_start - should be called when the ch7/ch8 switch is switched ON
-static void autotune_start()
+// autotune_init - should be called when autotune mode is selected
+static bool autotune_init(bool ignore_checks)
 {
+    bool success = true;
+
     switch (autotune_state.mode) {
         case AUTOTUNE_MODE_FAILED:
             // autotune has been run but failed so reset state to uninitialised
@@ -125,8 +127,8 @@ static void autotune_start()
             // no break to allow fall through to restart the tuning
         case AUTOTUNE_MODE_UNINITIALISED:
             // autotune has never been run
-            // switch into the AUTOTUNE flight mode
-            if (set_mode(AUTOTUNE)) {
+            success = autotune_start(false);
+            if (success) {
                 // so store current gains as original gains
                 autotune_backup_gains_and_initialise();
                 // advance mode to tuning
@@ -138,8 +140,8 @@ static void autotune_start()
 
         case AUTOTUNE_MODE_TUNING:
             // we are restarting tuning after the user must have switched ch7/ch8 off so we restart tuning where we left off
-            // set_mode to AUTOTUNE
-            if (set_mode(AUTOTUNE)) {
+            success = autotune_start(false);
+            if (success) {
                 // reset gains to tuning-start gains (i.e. low I term)
                 autotune_load_intra_test_gains();
                 // write dataflash log even and send message to ground station
@@ -155,6 +157,8 @@ static void autotune_start()
             Log_Write_Event(DATA_AUTOTUNE_PILOT_TESTING);
             break;
     }
+
+    return success;
 }
 
 // autotune_stop - should be called when the ch7/ch8 switch is switched OFF
@@ -174,8 +178,8 @@ static void autotune_stop()
     // we expect the caller will change the flight mode back to the flight mode indicated by the flight mode switch
 }
 
-// autotune_init - initialise autotune flight mode
-static bool autotune_init(bool ignore_checks)
+// autotune_start - initialise autotune flight mode
+static bool autotune_start(bool ignore_checks)
 {
     // only allow flip from Stabilize or AltHold flight modes
     if (control_mode != STABILIZE && control_mode != ALT_HOLD) {
@@ -649,6 +653,7 @@ static void autotune_attitude_control()
                 if (autotune_state.axis == AUTOTUNE_AXIS_ROLL) {
                     tune_roll_sp = tune_roll_sp * AUTOTUNE_SP_BACKOFF;
                     autotune_state.axis = AUTOTUNE_AXIS_PITCH;
+                    AP_Notify::events.autotune_next_axis = 1;
                 }else{
                     tune_pitch_sp = tune_pitch_sp * AUTOTUNE_SP_BACKOFF;
                     tune_roll_sp = min(tune_roll_sp, tune_pitch_sp);
@@ -658,6 +663,9 @@ static void autotune_attitude_control()
                     autotune_state.mode = AUTOTUNE_MODE_SUCCESS;
                     autotune_update_gcs(AUTOTUNE_MESSAGE_SUCCESS);
                     Log_Write_Event(DATA_AUTOTUNE_SUCCESS);
+
+                    // play a tone
+                    AP_Notify::events.autotune_complete = 1;
                 }
             }
         }
@@ -667,20 +675,6 @@ static void autotune_attitude_control()
         autotune_step_start_time = millis();
         break;
     }
-}
-
-// autotune has failed, return to standard gains and log event
-//  called when the autotune is unable to find good gains
-static void autotune_failed()
-{
-    // set autotune mode to failed so that it cannot restart
-    autotune_state.mode = AUTOTUNE_MODE_FAILED;
-    // set gains to their original values
-    autotune_load_orig_gains();
-    // re-enable angle-to-rate request limits
-    attitude_control.limit_angle_to_rate_request(true);
-    // log failure
-    Log_Write_Event(DATA_AUTOTUNE_FAILED);
 }
 
 // autotune_backup_gains_and_initialise - store current gains as originals

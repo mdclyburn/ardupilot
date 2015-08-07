@@ -76,7 +76,7 @@ static uint8_t mavlink_compassmot(mavlink_channel_t chan)
     init_compass();
 
     // default compensation type to use current if possible
-    if (battery.monitoring() == AP_BATT_MONITOR_VOLTAGE_AND_CURRENT) {
+    if (battery.has_current()) {
         comp_type = AP_COMPASS_MOT_COMP_CURRENT;
     }else{
         comp_type = AP_COMPASS_MOT_COMP_THROTTLE;
@@ -147,7 +147,7 @@ static uint8_t mavlink_compassmot(mavlink_channel_t chan)
         read_radio();
         
         // pass through throttle to motors
-        motors.throttle_pass_through();
+        motors.throttle_pass_through(g.rc_3.radio_in);
         
         // read some compass values
         compass.read();

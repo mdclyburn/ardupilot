@@ -7,6 +7,7 @@
 #include <AP_Math.h>
 #include <AP_InertialNav.h>     // Inertial Navigation library
 #include <AC_PosControl.h>      // Position control library
+#include <AC_AttitudeControl.h> // Attitude control library
 
 // loiter maximum velocities and accelerations
 #define WPNAV_ACCELERATION              100.0f      // defines the default velocity vs distant curve.  maximum acceleration in cm/s/s that position controller asks for from acceleration controller
@@ -56,7 +57,7 @@ public:
     };
 
     /// Constructor
-    AC_WPNav(const AP_InertialNav& inav, const AP_AHRS& ahrs, AC_PosControl& pos_control);
+    AC_WPNav(const AP_InertialNav& inav, const AP_AHRS& ahrs, AC_PosControl& pos_control, const AC_AttitudeControl& attitude_control);
 
     ///
     /// loiter controller
@@ -68,6 +69,9 @@ public:
 
     /// init_loiter_target - initialize's loiter position and feed-forward velocity from current pos and velocity
     void init_loiter_target();
+
+    /// loiter_soften_for_landing - reduce response for landing
+    void loiter_soften_for_landing();
 
     /// set_loiter_velocity - allows main code to pass the maximum velocity for loiter
     void set_loiter_velocity(float velocity_cms);
@@ -91,7 +95,7 @@ public:
     int32_t get_loiter_bearing_to_target() const;
 
     /// update_loiter - run the loiter controller - should be called at 10hz
-    void update_loiter();
+    void update_loiter(float ekfGndSpdLimit, float ekfNavVelGainScaler);
 
     ///
     /// waypoint controller
@@ -131,6 +135,11 @@ public:
 
     /// set_wp_origin_and_destination - set origin and destination waypoints using position vectors (distance from home in cm)
     void set_wp_origin_and_destination(const Vector3f& origin, const Vector3f& destination);
+
+    /// shift_wp_origin_to_current_pos - shifts the origin and destination so the origin starts at the current position
+    ///     used to reset the position just before takeoff
+    ///     relies on set_wp_destination or set_wp_origin_and_destination having been called first
+    void shift_wp_origin_to_current_pos();
 
     /// get_wp_stopping_point_xy - calculates stopping point based on current position, velocity, waypoint acceleration
     ///		results placed in stopping_position vector
@@ -188,6 +197,9 @@ public:
     ///     next_destination should be set to the next segment's destination if the seg_end_type is SEGMENT_END_STRAIGHT or SEGMENT_END_SPLINE
     void set_spline_origin_and_destination(const Vector3f& origin, const Vector3f& destination, bool stopped_at_start, spline_segment_end_type seg_end_type, const Vector3f& next_destination);
 
+    // set_spline_dest_and_vel - accepts a destination position and velocity, sets origin to current position and velocity
+    void set_spline_dest_and_vel(const Vector3f& dest_pos, const Vector3f& dest_vel);
+
     /// reached_spline_destination - true when we have come within RADIUS cm of the waypoint
     bool reached_spline_destination() const { return _flags.reached_destination; }
 
@@ -233,7 +245,7 @@ protected:
 
     /// calc_loiter_desired_velocity - updates desired velocity (i.e. feed forward) with pilot requested acceleration and fake wind resistance
     ///		updated velocity sent directly to position controller
-    void calc_loiter_desired_velocity(float nav_dt);
+    void calc_loiter_desired_velocity(float nav_dt, float ekfGndSpdLimit);
 
     /// get_bearing_cd - return bearing in centi-degrees between two positions
     float get_bearing_cd(const Vector3f &origin, const Vector3f &destination) const;
@@ -260,6 +272,7 @@ protected:
     const AP_InertialNav&   _inav;
     const AP_AHRS&          _ahrs;
     AC_PosControl&          _pos_control;
+    const AC_AttitudeControl& _attitude_control;
 
     // parameters
     AP_Float    _loiter_speed_cms;      // maximum horizontal speed in cm/s while in loiter
@@ -272,7 +285,6 @@ protected:
     AP_Float    _wp_accel_z_cms;        // vertical acceleration in cm/s/s during missions
 
     // loiter controller internal variables
-    uint32_t    _loiter_last_update;    // time of last update_loiter call
     uint8_t     _loiter_step;           // used to decide which portion of loiter controller to run during this iteration
     int16_t     _pilot_accel_fwd_cms; 	// pilot's desired acceleration forward (body-frame)
     int16_t     _pilot_accel_rgt_cms;   // pilot's desired acceleration right (body-frame)

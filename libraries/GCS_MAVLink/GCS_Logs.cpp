@@ -38,13 +38,12 @@ void GCS_MAVLINK::handle_log_message(mavlink_message_t *msg, DataFlash_Class &da
         handle_log_request_data(msg, dataflash);
         break;
     case MAVLINK_MSG_ID_LOG_ERASE:
-        dataflash.EraseAll();
+        handle_log_request_erase(msg, dataflash);
         break;
     case MAVLINK_MSG_ID_LOG_REQUEST_END:
-        _log_sending = false;
+        handle_log_request_end(msg, dataflash);
         break;
     }
-        
 }
 
 
@@ -55,8 +54,7 @@ void GCS_MAVLINK::handle_log_request_list(mavlink_message_t *msg, DataFlash_Clas
 {
     mavlink_log_request_list_t packet;
     mavlink_msg_log_request_list_decode(msg, &packet);
-    if (mavlink_check_target(packet.target_system, packet.target_component))
-        return;
+
     _log_listing = false;
     _log_sending = false;
 
@@ -90,8 +88,6 @@ void GCS_MAVLINK::handle_log_request_data(mavlink_message_t *msg, DataFlash_Clas
 {
     mavlink_log_request_data_t packet;
     mavlink_msg_log_request_data_decode(msg, &packet);
-    if (mavlink_check_target(packet.target_system, packet.target_component))
-        return;
 
     _log_listing = false;
     if (!_log_sending || _log_num_data != packet.id) {
@@ -124,6 +120,27 @@ void GCS_MAVLINK::handle_log_request_data(mavlink_message_t *msg, DataFlash_Clas
     _log_sending = true;
 
     handle_log_send(dataflash);
+}
+
+/**
+   handle request to erase log data
+ */
+void GCS_MAVLINK::handle_log_request_erase(mavlink_message_t *msg, DataFlash_Class &dataflash)
+{
+    mavlink_log_erase_t packet;
+    mavlink_msg_log_erase_decode(msg, &packet);
+
+    dataflash.EraseAll();
+}
+
+/**
+   handle request to stop transfer and resume normal logging
+ */
+void GCS_MAVLINK::handle_log_request_end(mavlink_message_t *msg, DataFlash_Class &dataflash)
+{
+    mavlink_log_request_end_t packet;
+    mavlink_msg_log_request_end_decode(msg, &packet);
+    _log_sending = false;
 }
 
 /**

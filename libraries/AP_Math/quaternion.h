@@ -15,12 +15,13 @@
  */
 
 // Copyright 2012 Andrew Tridgell, all rights reserved.
+// Refactored by Jonathan Challinger
 
 #ifndef QUATERNION_H
 #define QUATERNION_H
 
 #include <math.h>
-#if MATH_CHECK_INDEXES
+#if defined(MATH_CHECK_INDEXES) && (MATH_CHECK_INDEXES == 1)
 #include <assert.h>
 #endif
 
@@ -63,27 +64,48 @@ public:
     // create a quaternion from Euler angles
     void        from_euler(float roll, float pitch, float yaw);
 
+    void to_axis_angle(Vector3f &v);
+
+    void from_axis_angle(Vector3f v);
+
+    void from_axis_angle(const Vector3f &axis, float theta);
+
+    void rotate(const Vector3f &v);
+
+    void from_axis_angle_fast(Vector3f v);
+
+    void from_axis_angle_fast(const Vector3f &axis, float theta);
+
+    void rotate_fast(const Vector3f &v);
+
+
     // create eulers from a quaternion
-    void        to_euler(float *roll, float *pitch, float *yaw) const;
+    void        to_euler(float &roll, float &pitch, float &yaw) const;
 
     float length(void) const;
     void normalize();
 
+    Quaternion inverse(void) const;
+
     // allow a quaternion to be used as an array, 0 indexed
     float & operator[](uint8_t i) {
         float *_v = &q1;
-#if MATH_CHECK_INDEXES
-        assert(i >= 0 && i < 4);
+#if defined(MATH_CHECK_INDEXES) && (MATH_CHECK_INDEXES == 1)
+        assert(i < 4);
 #endif
         return _v[i];
     }
 
     const float & operator[](uint8_t i) const {
         const float *_v = &q1;
-#if MATH_CHECK_INDEXES
-        assert(i >= 0 && i < 4);
+#if defined(MATH_CHECK_INDEXES) && (MATH_CHECK_INDEXES == 1)
+        assert(i < 4);
 #endif
         return _v[i];
     }
+
+    Quaternion operator*(const Quaternion &v);
+    Quaternion &operator*=(const Quaternion &v);
+    Quaternion operator/(const Quaternion &v);
 };
 #endif // QUATERNION_H

@@ -28,6 +28,7 @@
 #include <AP_NavEKF.h>
 
 #define AP_AHRS_NAVEKF_AVAILABLE 1
+#define AP_AHRS_NAVEKF_SETTLE_TIME_MS 20000     // time in milliseconds the ekf needs to settle after being started
 
 class AP_AHRS_NavEKF : public AP_AHRS_DCM
 {
@@ -48,6 +49,10 @@ public:
     // return the current drift correction integrator value
     const Vector3f &get_gyro_drift(void) const;
 
+    // reset the current gyro drift estimate
+    //  should be called if gyro offsets are recalculated
+    void reset_gyro_drift(void);
+
     void            update(void);
     void            reset(bool recover_eulers = false);
 
@@ -55,7 +60,7 @@ public:
     void reset_attitude(const float &roll, const float &pitch, const float &yaw);
 
     // dead-reckoning support
-    bool get_position(struct Location &loc);
+    bool get_position(struct Location &loc) const;
 
     // status reporting of estimated error
     float           get_error_rp(void);
@@ -72,6 +77,7 @@ public:
     bool use_compass(void);
 
     NavEKF &get_NavEKF(void) { return EKF; }
+    const NavEKF &get_NavEKF_const(void) const { return EKF; }
 
     // return secondary attitude solution if available, as eulers in radians
     bool get_secondary_attitude(Vector3f &eulers);
@@ -82,6 +88,12 @@ public:
     // EKF has a better ground speed vector estimate
     Vector2f groundspeed_vector(void);
 
+    const Vector3f &get_accel_ef(uint8_t i) const;
+    const Vector3f &get_accel_ef() const { return get_accel_ef(_ins.get_primary_accel()); };
+
+    // blended accelerometer values in the earth frame in m/s/s
+    const Vector3f &get_accel_ef_blended(void) const;
+
     // set home location
     void set_home(const Location &loc);
 
@@ -90,10 +102,22 @@ public:
     bool get_velocity_NED(Vector3f &vec) const;
     bool get_relative_position_NED(Vector3f &vec) const;
 
+    // write optical flow measurements to EKF
+    void writeOptFlowMeas(uint8_t &rawFlowQuality, Vector2f &rawFlowRates, Vector2f &rawGyroRates, uint32_t &msecFlowMeas, uint8_t &rangeHealth, float &rawSonarRange);
+
+    // inibit GPS useage
+    uint8_t setInhibitGPS(void);
+
+    // get speed limit
+    void getEkfControlLimits(float &ekfGndSpdLimit, float &ekfNavVelGainScaler);
+
     void set_ekf_use(bool setting) { _ekf_use.set(setting); }
 
     // is the AHRS subsystem healthy?
-    bool healthy(void);
+    bool healthy(void) const;
+
+    // true if the AHRS has completed initialisation
+    bool initialised(void) const;
 
 private:
     bool using_EKF(void) const;
@@ -104,6 +128,8 @@ private:
     Vector3f _dcm_attitude;
     Vector3f _gyro_bias;
     Vector3f _gyro_estimate;
+    Vector3f _accel_ef_ekf[INS_MAX_INSTANCES];
+    Vector3f _accel_ef_ekf_blended;
     const uint16_t startup_delay_ms;
     uint32_t start_time_ms;
 };

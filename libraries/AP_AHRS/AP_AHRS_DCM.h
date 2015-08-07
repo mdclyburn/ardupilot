@@ -50,6 +50,9 @@ public:
         _last_wind_time(0),
         _last_airspeed(0.0f),
         _last_consistent_heading(0),
+#if HAL_CPU_CLASS >= HAL_CPU_CLASS_75
+        _imu1_weight(0.5f),
+#endif
         _last_failure_ms(0)
     {
         _dcm_matrix.identity();
@@ -75,6 +78,10 @@ public:
         return _omega_I;
     }
 
+    // reset the current gyro drift estimate
+    //  should be called if gyro offsets are recalculated
+    void reset_gyro_drift(void);
+
     // Methods
     void            update(void);
     void            reset(bool recover_eulers = false);
@@ -83,7 +90,7 @@ public:
     void reset_attitude(const float &roll, const float &pitch, const float &yaw);
 
     // dead-reckoning support
-    virtual bool get_position(struct Location &loc);
+    virtual bool get_position(struct Location &loc) const;
 
     // status reporting
     float           get_error_rp(void);
@@ -104,7 +111,7 @@ public:
     void estimate_wind(void);
 
     // is the AHRS subsystem healthy?
-    bool healthy(void);
+    bool healthy(void) const;
 
 private:
     float _ki;
@@ -190,6 +197,10 @@ private:
 
     // estimated wind in m/s
     Vector3f _wind;
+
+#if HAL_CPU_CLASS >= HAL_CPU_CLASS_75
+    float _imu1_weight;
+#endif
 
     // last time AHRS failed in milliseconds
     uint32_t _last_failure_ms;

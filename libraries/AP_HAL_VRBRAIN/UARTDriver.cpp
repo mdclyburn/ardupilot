@@ -16,6 +16,7 @@
 #include <termios.h>
 #include <drivers/drv_hrt.h>
 #include <assert.h>
+#include "../AP_HAL/utility/RingBuffer.h"
 
 using namespace VRBRAIN;
 
@@ -190,7 +191,7 @@ void VRBRAINUARTDriver::try_initialise(void)
         return;
     }
     _last_initialise_attempt_ms = hal.scheduler->millis();
-    if (hal.util->safety_switch_state() != AP_HAL::Util::SAFETY_ARMED) {
+    if (hal.util->safety_switch_state() != AP_HAL::Util::SAFETY_ARMED || !hal.util->get_soft_armed()) {
         begin(0);
     }
 }
@@ -233,15 +234,6 @@ void VRBRAINUARTDriver::set_blocking_writes(bool blocking)
 }
 
 bool VRBRAINUARTDriver::tx_pending() { return false; }
-
-/*
-  buffer handling macros
- */
-#define BUF_AVAILABLE(buf) ((buf##_head > (_tail=buf##_tail))? (buf##_size - buf##_head) + _tail: _tail - buf##_head)
-#define BUF_SPACE(buf) (((_head=buf##_head) > buf##_tail)?(_head - buf##_tail) - 1:((buf##_size - buf##_tail) + _head) - 1)
-#define BUF_EMPTY(buf) (buf##_head == buf##_tail)
-#define BUF_ADVANCETAIL(buf, n) buf##_tail = (buf##_tail + n) % buf##_size
-#define BUF_ADVANCEHEAD(buf, n) buf##_head = (buf##_head + n) % buf##_size
 
 /*
   return number of bytes available to be read from the buffer
@@ -495,13 +487,13 @@ void VRBRAINUARTDriver::_timer_tick(void)
     uint16_t _tail;
     n = BUF_AVAILABLE(_writebuf);
     if (n > 0) {
+        uint16_t n1 = _writebuf_size - _writebuf_head;
         perf_begin(_perf_uart);
-        if (_tail > _writebuf_head) {
+        if (n1 >= n) {
             // do as a single write
             _write_fd(&_writebuf[_writebuf_head], n);
         } else {
             // split into two writes
-            uint16_t n1 = _writebuf_size - _writebuf_head;
             int ret = _write_fd(&_writebuf[_writebuf_head], n1);
             if (ret == n1 && n > n1) {
                 _write_fd(&_writebuf[_writebuf_head], n - n1);                
@@ -514,13 +506,13 @@ void VRBRAINUARTDriver::_timer_tick(void)
     uint16_t _head;
     n = BUF_SPACE(_readbuf);
     if (n > 0) {
+        uint16_t n1 = _readbuf_size - _readbuf_tail;
         perf_begin(_perf_uart);
-        if (_readbuf_tail < _head) {
+        if (n1 >= n) {
             // one read will do
             assert(_readbuf_tail+n <= _readbuf_size);
             _read_fd(&_readbuf[_readbuf_tail], n);
         } else {
-            uint16_t n1 = _readbuf_size - _readbuf_tail;
             assert(_readbuf_tail+n1 <= _readbuf_size);
             int ret = _read_fd(&_readbuf[_readbuf_tail], n1);
             if (ret == n1 && n > n1) {

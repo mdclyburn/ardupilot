@@ -23,6 +23,16 @@
               <param index="6">Empty</param>
               <param index="7">Empty</param>
             </entry>
+            <entry name="MAV_CMD_DO_GRIPPER" value="211">
+              <description>Mission command to operate EPM gripper</description>
+              <param index="1">gripper number (a number from 1 to max number of grippers on the vehicle)</param>
+              <param index="2">gripper action (0=release, 1=grab. See GRIPPER_ACTIONS enum)</param>
+              <param index="3">Empty</param>
+              <param index="4">Empty</param>
+              <param index="5">Empty</param>
+              <param index="6">Empty</param>
+              <param index="7">Empty</param>
+            </entry>
           </enum>
 	  
 	  	<!--  AP_Limits Enums -->
@@ -72,6 +82,17 @@
       </entry>
       <entry name="MOTOR_TEST_THROTTLE_PILOT" value="2">
         <description>throttle pass-through from pilot's transmitter</description>
+      </entry>
+    </enum>
+
+    <!-- gripper action enum -->
+    <enum name="GRIPPER_ACTIONS">
+      <description>Gripper actions.</description>
+      <entry name="GRIPPER_ACTION_RELEASE" value="0">
+        <description>gripper release of cargo</description>
+      </entry>
+      <entry name="GRIPPER_ACTION_GRAB" value="1">
+        <description>gripper grabs onto cargo</description>
       </entry>
     </enum>
 
@@ -194,9 +215,9 @@
 	    <description>Message with some status from APM to GCS about camera or antenna mount</description>
 	    <field name="target_system" type="uint8_t">System ID</field>
 	    <field name="target_component" type="uint8_t">Component ID</field>
-	    <field name="pointing_a" type="int32_t">pitch(deg*100) or lat, depending on mount mode</field>
-	    <field name="pointing_b" type="int32_t">roll(deg*100) or lon depending on mount mode</field>
-	    <field name="pointing_c" type="int32_t">yaw(deg*100) or alt (in cm) depending on mount mode</field>
+	    <field name="pointing_a" type="int32_t">pitch(deg*100)</field>
+	    <field name="pointing_b" type="int32_t">roll(deg*100)</field>
+	    <field name="pointing_c" type="int32_t">yaw(deg*100)</field>
 	  </message>
 
 	  <!-- geo-fence messages -->
@@ -442,6 +463,54 @@
       <description>2nd Battery status</description>
       <field type="uint16_t" name="voltage">voltage in millivolts</field>
       <field type="int16_t" name="current_battery">Battery current, in 10*milliamperes (1 = 10 milliampere), -1: autopilot does not measure the current</field>
+    </message>
+
+    <message name="AHRS3" id="182">
+      <description>Status of third AHRS filter if available. This is for ANU research group (Ali and Sean)</description>
+      <field type="float" name="roll">Roll angle (rad)</field>
+      <field type="float" name="pitch">Pitch angle (rad)</field>
+      <field type="float" name="yaw">Yaw angle (rad)</field>
+      <field type="float" name="altitude">Altitude (MSL)</field>
+      <field type="int32_t" name="lat">Latitude in degrees * 1E7</field>
+      <field type="int32_t" name="lng">Longitude in degrees * 1E7</field>
+      <field type="float" name="v1">test variable1</field>
+      <field type="float" name="v2">test variable2</field>
+      <field type="float" name="v3">test variable3</field>
+      <field type="float" name="v4">test variable4</field>
+    </message>
+
+    <message name="AUTOPILOT_VERSION_REQUEST" id="183">
+        <description>Request the autopilot version from the system/component.</description>
+        <field type="uint8_t" name="target_system">System ID</field>
+        <field type="uint8_t" name="target_component">Component ID</field>
+    </message>
+
+    <message name="GIMBAL_REPORT" id="184">
+      <description>Report from MAVLink enabled gimbal to vehicle. The deltas are in gimbal sensor frame. Joint measurements assume a 312 ordering (azimuth, roll, pitch).</description>
+      <field type="uint8_t" name="target_system">System ID</field>
+      <field type="uint8_t" name="target_component">Component ID</field>
+      <field type="float" name="delta_time">Time since last update (seconds)</field>
+      <field type="float" name="delta_angle_x">Delta angle X, radians</field>
+      <field type="float" name="delta_angle_y">Delta angle Y, radians</field>
+      <field type="float" name="delta_angle_z">Delta angle Z, radians</field>
+      <field type="float" name="delta_velocity_x">Delta velocity X, m/s</field>
+      <field type="float" name="delta_velocity_y">Delta velocity Y, m/s</field>
+      <field type="float" name="delta_velocity_z">Delta velocity Z, m/s</field>
+      <field type="float" name="joint_roll">Joint roll, radians</field>
+      <field type="float" name="joint_pitch">Joint pitch, radians</field>
+      <field type="float" name="joint_yaw">Joint yaw, radians</field>
+    </message>
+
+    <message name="GIMBAL_CONTROL" id="185">
+      <description>Control packet from vehicle to MAVLink enabled gimbal. All values in gimbal sensor frame</description>
+      <field type="uint8_t" name="target_system">System ID</field>
+      <field type="uint8_t" name="target_component">Component ID</field>
+      <field type="float" name="demanded_rate_x">Demanded angular rate X, radians/s</field>
+      <field type="float" name="demanded_rate_y">Demanded angular rate Y, radians/s</field>
+      <field type="float" name="demanded_rate_z">Demanded angular rate Z, radians/s</field>
+      <field type="float" name="gyro_bias_x">Gyro bias X, radians/s</field>
+      <field type="float" name="gyro_bias_y">Gyro bias Y, radians/s</field>
+      <field type="float" name="gyro_bias_z">Gyro bias Z, radians/s</field>
     </message>
 
      </messages>

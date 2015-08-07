@@ -1,6 +1,6 @@
 /// -*- tab-width: 4; Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
-#define THISFIRMWARE "ArduPlane V3.1.0"
+#define THISFIRMWARE "ArduPlane V3.3.0beta1"
 /*
    Lead developer: Andrew Tridgell
  
@@ -59,6 +59,7 @@
 #include <AP_AutoTune.h>
 #include <GCS.h>
 #include <GCS_MAVLink.h>    // MAVLink GCS definitions
+#include <AP_SerialManager.h>   // Serial manager library
 #include <AP_Mount.h>           // Camera/Antenna mount
 #include <AP_Declination.h> // ArduPilot Mega Declination Helper Library
 #include <DataFlash.h>
@@ -84,6 +85,8 @@
 #include <AP_ServoRelayEvents.h>
 
 #include <AP_Rally.h>
+
+#include <AP_OpticalFlow.h>     // Optical Flow library
 
 // Pre-AP_HAL compatibility
 #include "compat.h"
@@ -152,7 +155,6 @@ static void print_flight_mode(AP_HAL::BetterStream *port, uint8_t mode);
 ////////////////////////////////////////////////////////////////////////////////
 // DataFlash
 ////////////////////////////////////////////////////////////////////////////////
-#if LOGGING_ENABLED == ENABLED
 #if CONFIG_HAL_BOARD == HAL_BOARD_APM1
 static DataFlash_APM1 DataFlash;
 #elif CONFIG_HAL_BOARD == HAL_BOARD_APM2
@@ -162,7 +164,6 @@ static DataFlash_File DataFlash(HAL_BOARD_LOG_DIRECTORY);
 #else
 // no dataflash driver
 DataFlash_Empty DataFlash;
-#endif
 #endif
 
 // has a log download started?
@@ -191,21 +192,7 @@ static AP_GPS gps;
 // flight modes convenience array
 static AP_Int8          *flight_modes = &g.flight_mode1;
 
-#if CONFIG_BARO == HAL_BARO_BMP085
-static AP_Baro_BMP085 barometer;
-#elif CONFIG_BARO == HAL_BARO_PX4
-static AP_Baro_PX4 barometer;
-#elif CONFIG_BARO == HAL_BARO_VRBRAIN
-static AP_Baro_VRBRAIN barometer;
-#elif CONFIG_BARO == HAL_BARO_HIL
-static AP_Baro_HIL barometer;
-#elif CONFIG_BARO == HAL_BARO_MS5611
-static AP_Baro_MS5611 barometer(&AP_Baro_MS5611::i2c);
-#elif CONFIG_BARO == HAL_BARO_MS5611_SPI
-static AP_Baro_MS5611 barometer(&AP_Baro_MS5611::spi);
-#else
- #error Unrecognized CONFIG_BARO setting
-#endif
+static AP_Baro barometer;
 
 #if CONFIG_COMPASS == HAL_COMPASS_PX4
 static AP_Compass_PX4 compass;
@@ -215,33 +202,17 @@ static AP_Compass_VRBRAIN compass;
 static AP_Compass_HMC5843 compass;
 #elif CONFIG_COMPASS == HAL_COMPASS_HIL
 static AP_Compass_HIL compass;
+#elif CONFIG_COMPASS == HAL_COMPASS_AK8963
+static AP_Compass_AK8963_MPU9250 compass;
 #else
  #error Unrecognized CONFIG_COMPASS setting
 #endif
 
-#if CONFIG_INS_TYPE == HAL_INS_OILPAN || CONFIG_HAL_BOARD == HAL_BOARD_APM1
+#if CONFIG_HAL_BOARD == HAL_BOARD_APM1
 AP_ADC_ADS7844 apm1_adc;
 #endif
 
-#if CONFIG_INS_TYPE == HAL_INS_MPU6000
-AP_InertialSensor_MPU6000 ins;
-#elif CONFIG_INS_TYPE == HAL_INS_PX4
-AP_InertialSensor_PX4 ins;
-#elif CONFIG_INS_TYPE == HAL_INS_VRBRAIN
-AP_InertialSensor_VRBRAIN ins;
-#elif CONFIG_INS_TYPE == HAL_INS_HIL
-AP_InertialSensor_HIL ins;
-#elif CONFIG_INS_TYPE == HAL_INS_OILPAN
-AP_InertialSensor_Oilpan ins( &apm1_adc );
-#elif CONFIG_INS_TYPE == HAL_INS_FLYMAPLE
-AP_InertialSensor_Flymaple ins;
-#elif CONFIG_INS_TYPE == HAL_INS_L3G4200D
-AP_InertialSensor_L3G4200D ins;
-#elif CONFIG_INS_TYPE == HAL_INS_MPU9250
-AP_InertialSensor_MPU9250 ins;
-#else
-  #error Unrecognised CONFIG_INS_TYPE setting.
-#endif // CONFIG_INS_TYPE
+AP_InertialSensor ins;
 
 // Inertial Navigation EKF
 #if AP_AHRS_NAVEKF_AVAILABLE
@@ -280,9 +251,15 @@ static struct {
 // should throttle be pass-thru in guided?
 static bool guided_throttle_passthru;
 
+// are we doing calibration? This is used to allow heartbeat to
+// external failsafe boards during baro and airspeed calibration
+static bool in_calibration;
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // GCS selection
 ////////////////////////////////////////////////////////////////////////////////
+static AP_SerialManager serial_manager;
 static const uint8_t num_gcs = MAVLINK_COMM_NUM_BUFFERS;
 static GCS_MAVLINK gcs[MAVLINK_COMM_NUM_BUFFERS];
 
@@ -300,9 +277,16 @@ static AP_SpdHgtControl *SpdHgt_Controller = &TECS_controller;
 static AP_HAL::AnalogSource *rssi_analog_source;
 
 ////////////////////////////////////////////////////////////////////////////////
-// Sonar
+// rangefinder
 ////////////////////////////////////////////////////////////////////////////////
-static RangeFinder sonar;
+static RangeFinder rangefinder;
+
+static struct {
+    bool in_range;
+    float correction;
+    uint32_t last_correction_time_ms;
+    uint8_t in_range_count;
+} rangefinder_state;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Relay
@@ -317,8 +301,13 @@ static AP_ServoRelayEvents ServoRelayEvents(relay);
 static AP_Camera camera(&relay);
 #endif
 
+////////////////////////////////////////////////////////////////////////////////
+// Optical flow sensor
+////////////////////////////////////////////////////////////////////////////////
+static OpticalFlow optflow;
+
 //Rally Ponints
-AP_Rally rally(ahrs);
+static AP_Rally rally(ahrs);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Global variables
@@ -356,6 +345,9 @@ static uint8_t oldSwitchPosition = 254;
 // This is used to enable the inverted flight feature
 static bool inverted_flight     = false;
 
+// This is used to enable the PX4IO override for testing
+static bool px4io_override_enabled = false;
+
 static struct {
     // These are trim values used for elevon control
     // For elevons radio_in[CH_ROLL] and radio_in[CH_PITCH] are
@@ -377,8 +369,6 @@ static struct {
 // Failsafe
 ////////////////////////////////////////////////////////////////////////////////
 static struct {
-    // A flag if GCS joystick control is in use
-    uint8_t rc_override_active:1;
 
     // Used to track if the value on channel 3 (throtttle) has fallen below the failsafe threshold
     // RC receiver should be set up to output a low throttle value when signal is lost
@@ -502,7 +492,7 @@ static struct {
     int32_t hold_course_cd;
 
     // locked_course and locked_course_cd are used in stabilize mode 
-    // when ground steering is active
+    // when ground steering is active, and for steering in auto-takeoff
     bool locked_course;
     float locked_course_err;
 } steer_state = {
@@ -534,6 +524,12 @@ static struct {
     // in FBWA taildragger takeoff mode
     bool fbwa_tdrag_takeoff_mode:1;
 
+    // have we checked for an auto-land?
+    bool checked_for_autoland:1;
+
+    // denotes if a go-around has been commanded for landing
+    bool commanded_go_around:1;
+
     // Altitude threshold to complete a takeoff command in autonomous modes.  Centimeters
     int32_t takeoff_altitude_cm;
 
@@ -552,6 +548,15 @@ static struct {
 
     // filtered sink rate for landing
     float land_sink_rate;
+
+    // time when we first pass min GPS speed on takeoff
+    uint32_t takeoff_speed_time_ms;
+
+    // distance to next waypoint
+    float wp_distance;
+
+    // proportion to next waypoint
+    float wp_proportion;
 } auto_state = {
     takeoff_complete : true,
     land_complete : false,
@@ -559,12 +564,15 @@ static struct {
     next_wp_no_crosstrack : true,
     no_crosstrack : true,
     fbwa_tdrag_takeoff_mode : false,
+    checked_for_autoland : false,
+    commanded_go_around : false,
     takeoff_altitude_cm : 0,
     takeoff_pitch_cd : 0,
     highest_airspeed : 0,
     initial_pitch_cd : 0,
     next_turn_angle  : 90.0f,
-    land_sink_rate   : 0
+    land_sink_rate   : 0,
+    takeoff_speed_time_ms : 0
 };
 
 // true if we are in an auto-throttle mode, which means
@@ -589,6 +597,13 @@ static int32_t nav_roll_cd;
 // The instantaneous desired pitch angle.  Hundredths of a degree
 static int32_t nav_pitch_cd;
 
+// the aerodymamic load factor. This is calculated from the demanded
+// roll before the roll is clipped, using 1/sqrt(cos(nav_roll))
+static float aerodynamic_load_factor = 1.0f;
+
+// a smoothed airspeed estimate, used for limiting roll angle
+static float smoothed_airspeed;
+
 ////////////////////////////////////////////////////////////////////////////////
 // Mission library
 ////////////////////////////////////////////////////////////////////////////////
@@ -612,15 +627,6 @@ AP_Terrain terrain(ahrs, mission, rally);
 #if OBC_FAILSAFE == ENABLED
 APM_OBC obc(mission, barometer, gps, rcmap);
 #endif
-
-////////////////////////////////////////////////////////////////////////////////
-// Waypoint distances
-////////////////////////////////////////////////////////////////////////////////
-// Distance between plane and next waypoint.  Meters
-static uint32_t wp_distance;
-
-// Distance between previous and next waypoint.  Meters
-static uint32_t wp_totalDistance;
 
 /*
   meta data to support counting the number of circles in a loiter
@@ -666,7 +672,7 @@ static int16_t condition_rate;
 static const struct Location &home = ahrs.get_home();
 
 // Flag for if we have g_gps lock and have set the home location in AHRS
-static bool home_is_set;
+static enum HomeState home_is_set;
 // The location of the previous waypoint.  Used for track following and altitude ramp calculations
 static Location prev_WP_loc;
 // The plane's current location
@@ -714,8 +720,9 @@ static float G_Dt                                               = 0.02f;
 ////////////////////////////////////////////////////////////////////////////////
 // Timer used to accrue data and trigger recording of the performanc monitoring log message
 static uint32_t perf_mon_timer;
-// The maximum main loop execution time recorded in the current performance monitoring interval
+// The maximum and minimum main loop execution time recorded in the current performance monitoring interval
 static uint32_t G_Dt_max = 0;
+static uint32_t G_Dt_min = 0;
 
 ////////////////////////////////////////////////////////////////////////////////
 // System Timers
@@ -734,13 +741,7 @@ static uint16_t mainLoop_count;
 #if MOUNT == ENABLED
 // current_loc uses the baro/gps soloution for altitude rather than gps only.
 // mabe one could use current_loc for lat/lon too and eliminate g_gps alltogether?
-static AP_Mount camera_mount(&current_loc, ahrs, 0);
-#endif
-
-#if MOUNT2 == ENABLED
-// current_loc uses the baro/gps soloution for altitude rather than gps only.
-// mabe one could use current_loc for lat/lon too and eliminate g_gps alltogether?
-static AP_Mount camera_mount2(&current_loc, ahrs, 1);
+static AP_Mount camera_mount(ahrs, current_loc);
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -783,7 +784,10 @@ static const AP_Scheduler::Task scheduler_tasks[] PROGMEM = {
     { compass_accumulate,     1,   1500 },
     { barometer_accumulate,   1,    900 },
     { update_notify,          1,    300 },
-    { read_sonars,            1,    500 },
+    { read_rangefinder,       1,    500 },
+#if OPTFLOW == ENABLED
+    { update_optical_flow,    1,    500 },
+#endif
     { one_second_loop,       50,   1000 },
     { check_long_failsafe,   15,   1000 },
     { read_receiver_rssi,     5,   1000 },
@@ -823,17 +827,21 @@ void setup() {
 void loop()
 {
     // wait for an INS sample
-    if (!ins.wait_for_sample(1000)) {
-        return;
-    }
+    ins.wait_for_sample();
+
     uint32_t timer = hal.scheduler->micros();
 
     delta_us_fast_loop  = timer - fast_loopTimer_us;
     G_Dt                = delta_us_fast_loop * 1.0e-6f;
-    fast_loopTimer_us   = timer;
 
-    if (delta_us_fast_loop > G_Dt_max)
+    if (delta_us_fast_loop > G_Dt_max && fast_loopTimer_us != 0) {
         G_Dt_max = delta_us_fast_loop;
+    }
+
+    if (delta_us_fast_loop < G_Dt_min || G_Dt_min == 0) {
+        G_Dt_min = delta_us_fast_loop;
+    }
+    fast_loopTimer_us   = timer;
 
     mainLoop_count++;
 
@@ -855,7 +863,7 @@ void loop()
 // update AHRS system
 static void ahrs_update()
 {
-    ahrs.set_armed(arming.is_armed() && 
+    hal.util->set_soft_armed(arming.is_armed() &&
                    hal.util->safety_switch_state() != AP_HAL::Util::SAFETY_DISARMED);
 
 #if HIL_MODE != HIL_MODE_DISABLED
@@ -875,6 +883,12 @@ static void ahrs_update()
     // calculate a scaled roll limit based on current pitch
     roll_limit_cd = g.roll_limit_cd * cosf(ahrs.pitch);
     pitch_limit_min_cd = aparm.pitch_limit_min_cd * fabsf(cosf(ahrs.roll));
+
+    // updated the summed gyro used for ground steering and
+    // auto-takeoff. Dot product of DCM.c with gyro vector gives earth
+    // frame yaw rate
+    steer_state.locked_course_err += ahrs.get_yaw_rate_earth() * G_Dt;
+    steer_state.locked_course_err = wrap_PI(steer_state.locked_course_err);
 }
 
 /*
@@ -897,11 +911,7 @@ static void update_speed_height(void)
 static void update_mount(void)
 {
 #if MOUNT == ENABLED
-    camera_mount.update_mount_position();
-#endif
-
-#if MOUNT2 == ENABLED
-    camera_mount2.update_mount_position();
+    camera_mount.update();
 #endif
 
 #if CAMERA == ENABLED
@@ -918,7 +928,7 @@ static void update_compass(void)
         ahrs.set_compass(&compass);
         compass.learn_offsets();
         if (should_log(MASK_LOG_COMPASS)) {
-            Log_Write_Compass();
+            DataFlash.Log_Write_Compass(compass);
         }
     } else {
         ahrs.set_compass(NULL);
@@ -989,14 +999,9 @@ static void obc_fs_check(void)
  */
 static void update_aux(void)
 {
-    RC_Channel_aux::enable_aux_servos();
-
-#if MOUNT == ENABLED
-        camera_mount.update_mount_type();
-#endif
-#if MOUNT2 == ENABLED
-        camera_mount2.update_mount_type();
-#endif
+    if (!px4io_override_enabled) {
+        RC_Channel_aux::enable_aux_servos();
+    }
 }
 
 static void one_second_loop()
@@ -1020,6 +1025,7 @@ static void one_second_loop()
 
     // update notify flags
     AP_Notify::flags.pre_arm_check = arming.pre_arm_checks(false);
+    AP_Notify::flags.pre_arm_gps_check = true;
     AP_Notify::flags.armed = arming.is_armed() || arming.arming_required() == AP_Arming::NO;
 
 #if AP_TERRAIN_AVAILABLE
@@ -1032,11 +1038,14 @@ static void one_second_loop()
 static void log_perf_info()
 {
     if (scheduler.debug() != 0) {
-        gcs_send_text_fmt(PSTR("G_Dt_max=%lu\n"), (unsigned long)G_Dt_max);
+        gcs_send_text_fmt(PSTR("G_Dt_max=%lu G_Dt_min=%lu\n"), 
+                          (unsigned long)G_Dt_max, 
+                          (unsigned long)G_Dt_min);
     }
     if (should_log(MASK_LOG_PM))
         Log_Write_Performance();
     G_Dt_max = 0;
+    G_Dt_min = 0;
     resetPerfData();
 }
 
@@ -1051,6 +1060,13 @@ static void terrain_update(void)
 {
 #if AP_TERRAIN_AVAILABLE
     terrain.update();
+
+    // tell the rangefinder our height, so it can go into power saving
+    // mode if available
+    float height;
+    if (terrain.height_above_terrain(height, true)) {
+        rangefinder.set_estimated_terrain_height(height);
+    }
 #endif
 }
 
@@ -1148,7 +1164,7 @@ static void update_GPS_10Hz(void)
         }
 #endif        
 
-        if (!ahrs.get_armed()) {
+        if (!hal.util->get_soft_armed()) {
             update_home();
         }
 
@@ -1190,11 +1206,8 @@ static void handle_auto_mode(void)
             // during final approach constrain roll to the range
             // allowed for level flight
             nav_roll_cd = constrain_int32(nav_roll_cd, -g.level_roll_limit*100UL, g.level_roll_limit*100UL);
-            
-            // hold pitch above the specified land pitch in final approach
-            nav_pitch_cd = constrain_int32(nav_pitch_cd, g.land_pitch_cd, nav_pitch_cd);
         } else {
-            if (!airspeed.use()) {
+            if (!ahrs.airspeed_sensor_enabled()) {
                 // when not under airspeed control, don't allow
                 // down pitch in landing
                 nav_pitch_cd = constrain_int32(nav_pitch_cd, 0, nav_pitch_cd);
@@ -1302,6 +1315,7 @@ static void update_flight_mode(void)
         // set nav_roll and nav_pitch using sticks
         nav_roll_cd  = channel_roll->norm_input() * roll_limit_cd;
         nav_roll_cd = constrain_int32(nav_roll_cd, -roll_limit_cd, roll_limit_cd);
+        update_load_factor();
         float pitch_input = channel_pitch->norm_input();
         if (pitch_input > 0) {
             nav_pitch_cd = pitch_input * aparm.pitch_limit_max_cd;
@@ -1335,6 +1349,8 @@ static void update_flight_mode(void)
     case FLY_BY_WIRE_B:
         // Thanks to Yury MonZon for the altitude limit code!
         nav_roll_cd = channel_roll->norm_input() * roll_limit_cd;
+        nav_roll_cd = constrain_int32(nav_roll_cd, -roll_limit_cd, roll_limit_cd);
+        update_load_factor();
         update_fbwb_speed_height();
         break;
         
@@ -1352,6 +1368,8 @@ static void update_flight_mode(void)
         
         if (!cruise_state.locked_heading) {
             nav_roll_cd = channel_roll->norm_input() * roll_limit_cd;
+            nav_roll_cd = constrain_int32(nav_roll_cd, -roll_limit_cd, roll_limit_cd);
+            update_load_factor();
         } else {
             calc_nav_roll();
         }
@@ -1370,6 +1388,7 @@ static void update_flight_mode(void)
         // holding altitude at the altitude we set when we
         // switched into the mode
         nav_roll_cd  = roll_limit_cd / 3;
+        update_load_factor();
         calc_nav_pitch();
         calc_throttle();
         break;
@@ -1400,8 +1419,21 @@ static void update_navigation()
         update_commands();
         break;
             
-    case LOITER:
     case RTL:
+        if (g.rtl_autoland && 
+            !auto_state.checked_for_autoland &&
+            nav_controller->reached_loiter_target() && 
+            labs(altitude_error_cm) < 1000) {
+            // we've reached the RTL point, see if we have a landing sequence
+            jump_to_landing_sequence();
+
+            // prevent running the expensive jump_to_landing_sequence
+            // on every loop
+            auto_state.checked_for_autoland = true;
+        }
+        // fall through to LOITER
+
+    case LOITER:
     case GUIDED:
         // allow loiter direction to be changed in flight
         if (g.loiter_radius < 0) {
@@ -1455,7 +1487,7 @@ static void set_flight_stage(AP_SpdHgtControl::FlightStage fs)
 
 static void update_alt()
 {
-    barometer.read();
+    barometer.update();
     if (should_log(MASK_LOG_IMU)) {
         Log_Write_Baro();
     }
@@ -1492,7 +1524,8 @@ static void update_flight_stage(void)
                                                  flight_stage,
                                                  auto_state.takeoff_pitch_cd,
                                                  throttle_nudge,
-                                                 relative_altitude());
+                                                 relative_altitude(),
+                                                 aerodynamic_load_factor);
         if (should_log(MASK_LOG_TECS)) {
             Log_Write_TECS_Tuning();
         }
@@ -1502,4 +1535,31 @@ static void update_flight_stage(void)
     airspeed.set_EAS2TAS(barometer.get_EAS2TAS());
 }
 
+#if OPTFLOW == ENABLED
+// called at 50hz
+static void update_optical_flow(void)
+{
+    static uint32_t last_of_update = 0;
+
+    // exit immediately if not enabled
+    if (!optflow.enabled()) {
+        return;
+    }
+
+    // read from sensor
+    optflow.update();
+
+    // write to log and send to EKF if new data has arrived
+    if (optflow.last_update() != last_of_update) {
+        last_of_update = optflow.last_update();
+        uint8_t flowQuality = optflow.quality();
+        Vector2f flowRate = optflow.flowRate();
+        Vector2f bodyRate = optflow.bodyRate();
+        // Use range from a separate range finder if available, not the PX4Flows built in sensor which is ineffective
+        float ground_distance_m = 0.01f*rangefinder.distance_cm();
+        ahrs.writeOptFlowMeas(flowQuality, flowRate, bodyRate, last_of_update, rangefinder_state.in_range_count, ground_distance_m);
+        Log_Write_Optflow();
+    }
+}
+#endif
 AP_HAL_MAIN();

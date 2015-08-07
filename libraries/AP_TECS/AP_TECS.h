@@ -50,7 +50,8 @@ public:
                                enum FlightStage flight_stage,
                                int32_t ptchMinCO_cd,
                                int16_t throttle_nudge,
-							   float hgt_afe);
+							   float hgt_afe,
+							   float load_factor);
 
 	// demanded throttle in percentage
 	// should return 0 to 100
@@ -71,6 +72,9 @@ public:
 
 	// return maximum climb rate
 	float get_max_climbrate(void) const { return _maxClimbRate; }
+
+	// return landing sink rate
+	float get_land_sinkrate(void) const { return _land_sink; }
 
 	// this supports the TECS_* user settable parameters
     static const struct AP_Param::GroupInfo var_info[];
@@ -114,7 +118,9 @@ private:
     AP_Float _minSinkRate;
     AP_Float _maxSinkRate;
     AP_Float _timeConst;
+    AP_Float _landTimeConst;
     AP_Float _ptchDamp;
+    AP_Float _landDamp;
     AP_Float _thrDamp;
     AP_Float _integGain;
     AP_Float _vertAccLim;
@@ -137,7 +143,7 @@ private:
 	float _integ1_state;
 	
 	// Integrator state 2 - height rate
-	float _integ2_state;
+	float _climb_rate;
 
 	// Integrator state 3 - height
 	float _integ3_state;
@@ -184,6 +190,7 @@ private:
     float _hgt_dem_adj_last;
     float _hgt_rate_dem;
 	float _hgt_dem_prev;
+    float _land_hgt_dem;
 
     // Speed demand after application of rate limiting
     // This is the demand tracked by the TECS control loops
@@ -204,9 +211,6 @@ private:
 
     // climbout mode
     enum FlightStage _flight_stage;
-
-	// throttle demand before limiting
-	float _throttle_dem_unc;
 
 	// pitch demand before limiting
 	float _pitch_dem_unc;
@@ -239,8 +243,11 @@ private:
 	// Time since last update of main TECS loop (seconds)
 	float _DT;
 
+	// counter for demanded sink rate on land final
+	uint8_t _flare_counter;
+
     // Update the airspeed internal state using a second order complementary filter
-    void _update_speed(void);
+    void _update_speed(float load_factor);
 
     // Update the demanded airspeed
     void _update_speed_demand(void);
@@ -274,6 +281,9 @@ private:
 
     // declares a 5point average filter using floats
 	AverageFilterFloat_Size5 _vdot_filter;
+
+	// current time constant
+	float timeConstant(void);
 };
 
 #define TECS_LOG_FORMAT(msg) { msg, sizeof(AP_TECS::log_TECS_Tuning),	\

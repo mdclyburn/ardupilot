@@ -51,13 +51,8 @@
 //////////////////////////////////////////////////////////////////////////////
 // sensor types
 
-#define CONFIG_INS_TYPE HAL_INS_DEFAULT
 #define CONFIG_BARO     HAL_BARO_DEFAULT
 #define CONFIG_COMPASS  HAL_COMPASS_DEFAULT
-
-#ifdef HAL_SERIAL0_BAUD_DEFAULT
-# define SERIAL0_BAUD HAL_SERIAL0_BAUD_DEFAULT
-#endif
 
 //////////////////////////////////////////////////////////////////////////////
 // HIL_MODE                                 OPTIONAL
@@ -69,8 +64,6 @@
 #if HIL_MODE != HIL_MODE_DISABLED       // we are in HIL mode
  #undef CONFIG_BARO
  #define CONFIG_BARO HAL_BARO_HIL
- #undef CONFIG_INS_TYPE
- #define CONFIG_INS_TYPE HAL_INS_HIL
  #undef  CONFIG_COMPASS
  #define CONFIG_COMPASS HAL_COMPASS_HIL
 #endif
@@ -109,18 +102,6 @@
 # define MAV_SYSTEM_ID		1
 #endif
 
-//////////////////////////////////////////////////////////////////////////////
-// Serial port speeds.
-//
-#ifndef SERIAL0_BAUD
-# define SERIAL0_BAUD			115200
-#endif
-#ifndef SERIAL1_BAUD
-# define SERIAL1_BAUD			 57600
-#endif
-#ifndef SERIAL2_BAUD
-# define SERIAL2_BAUD			 57600
-#endif
 
 //////////////////////////////////////////////////////////////////////////////
 // FrSky telemetry support

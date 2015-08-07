@@ -10,7 +10,7 @@
 // rtl_init - initialise rtl controller
 static bool rtl_init(bool ignore_checks)
 {
-    if (GPS_ok() || ignore_checks) {
+    if (position_ok() || ignore_checks) {
         rtl_climb_start();
         return true;
     }else{
@@ -90,9 +90,9 @@ static void rtl_climb_start()
     Location rally_point = rally.calc_best_rally_or_home_location(current_loc, get_RTL_alt()+ahrs.get_home().alt);
     rally_point.alt -= ahrs.get_home().alt; // convert to altitude above home
     rally_point.alt = max(rally_point.alt, current_loc.alt);    // ensure we do not descend before reaching home
-    destination.z = rally_point.alt;
+    destination.z = pv_alt_above_origin(rally_point.alt);
 #else
-    destination.z = get_RTL_alt();
+    destination.z = pv_alt_above_origin(get_RTL_alt());
 #endif
 
     // set the destination
@@ -117,7 +117,8 @@ static void rtl_return_start()
     rally_point.alt = max(rally_point.alt, current_loc.alt);    // ensure we do not descend before reaching home
     Vector3f destination = pv_location_to_vector(rally_point);
 #else
-    Vector3f destination = Vector3f(0,0,get_RTL_alt());
+    Vector3f destination = pv_location_to_vector(ahrs.get_home());
+    destination.z = get_RTL_alt();
 #endif
 
     wp_nav.set_wp_destination(destination);
@@ -261,7 +262,7 @@ static void rtl_descent_run()
     float target_yaw_rate = 0;
 
     // if not auto armed set throttle to zero and exit immediately
-    if(!ap.auto_armed || !inertial_nav.position_ok()) {
+    if(!ap.auto_armed) {
         attitude_control.relax_bf_rate_controller();
         attitude_control.set_yaw_target_to_current_heading();
         attitude_control.set_throttle_out(0, false);
@@ -289,10 +290,10 @@ static void rtl_descent_run()
     wp_nav.set_pilot_desired_acceleration(roll_control, pitch_control);
 
     // run loiter controller
-    wp_nav.update_loiter();
+    wp_nav.update_loiter(ekfGndSpdLimit, ekfNavVelGainScaler);
 
     // call z-axis position controller
-    pos_control.set_alt_target_with_slew(g.rtl_alt_final, G_Dt);
+    pos_control.set_alt_target_with_slew(pv_alt_above_origin(g.rtl_alt_final), G_Dt);
     pos_control.update_z_controller();
 
     // roll & pitch from waypoint controller, yaw rate from pilot
@@ -325,13 +326,33 @@ static void rtl_land_run()
     int16_t roll_control = 0, pitch_control = 0;
     float target_yaw_rate = 0;
     // if not auto armed set throttle to zero and exit immediately
-    if(!ap.auto_armed || !inertial_nav.position_ok()) {
+    if(!ap.auto_armed || ap.land_complete) {
         attitude_control.relax_bf_rate_controller();
         attitude_control.set_yaw_target_to_current_heading();
         attitude_control.set_throttle_out(0, false);
         // set target to current position
         wp_nav.init_loiter_target();
+
+#if LAND_REQUIRE_MIN_THROTTLE_TO_DISARM == ENABLED
+        // disarm when the landing detector says we've landed and throttle is at minimum
+        if (ap.land_complete && (ap.throttle_zero || failsafe.radio)) {
+            init_disarm_motors();
+        }
+#else
+        // disarm when the landing detector says we've landed
+        if (ap.land_complete) {
+            init_disarm_motors();
+        }
+#endif
+
+        // check if we've completed this stage of RTL
+        rtl_state_complete = ap.land_complete;
         return;
+    }
+
+    // relax loiter target if we might be landed
+    if (land_complete_maybe()) {
+        wp_nav.loiter_soften_for_landing();
     }
 
     // process pilot's input
@@ -353,30 +374,21 @@ static void rtl_land_run()
     wp_nav.set_pilot_desired_acceleration(roll_control, pitch_control);
 
     // run loiter controller
-    wp_nav.update_loiter();
+    wp_nav.update_loiter(ekfGndSpdLimit, ekfNavVelGainScaler);
 
     // call z-axis position controller
-    float cmb_rate = get_throttle_land();
-    pos_control.set_alt_target_from_climb_rate(cmb_rate, G_Dt);
+    float cmb_rate = get_land_descent_speed();
+    pos_control.set_alt_target_from_climb_rate(cmb_rate, G_Dt, true);
     pos_control.update_z_controller();
+
+    // record desired climb rate for logging
+    desired_climb_rate = cmb_rate;
 
     // roll & pitch from waypoint controller, yaw rate from pilot
     attitude_control.angle_ef_roll_pitch_rate_ef_yaw(wp_nav.get_roll(), wp_nav.get_pitch(), target_yaw_rate);
 
     // check if we've completed this stage of RTL
     rtl_state_complete = ap.land_complete;
-
-#if LAND_REQUIRE_MIN_THROTTLE_TO_DISARM == ENABLED
-    // disarm when the landing detector says we've landed and throttle is at minimum
-    if (ap.land_complete && (g.rc_3.control_in == 0 || failsafe.radio)) {
-        init_disarm_motors();
-    }
-#else
-    // disarm when the landing detector says we've landed
-    if (ap.land_complete) {
-        init_disarm_motors();
-    }
-#endif
 }
 
 // get_RTL_alt - return altitude which vehicle should return home at

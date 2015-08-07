@@ -9,6 +9,7 @@
 #include <AP_Buffer.h>                  // FIFO buffer library
 #include <AP_GPS_Glitch.h>              // GPS Glitch detection library
 #include <AP_Baro_Glitch.h>             // Baro Glitch detection library
+#include "../AP_NavEKF/AP_Nav_Common.h" // definitions shared by inertial and ekf nav filters
 
 #define AP_INTERTIALNAV_TC_XY   2.5f // default time constant for complementary filter's X & Y axis
 #define AP_INTERTIALNAV_TC_Z    5.0f // default time constant for complementary filter's Z axis
@@ -29,6 +30,9 @@
  * To improve the accuracy, baro and gps readings are used:
  *      An error value is calculated as the difference between the sensor's measurement and the last position estimation.
  *   	This value is weighted with a gain factor and incorporated into the new estimation
+ *
+ * Special thanks to Tony Lambregts (FAA) for advice which contributed to the development of this filter.
+ *
  */
 class AP_InertialNav
 {
@@ -70,15 +74,21 @@ public:
      */
     virtual void update(float dt);
 
+    /**
+     * get_filter_status : returns filter status as a series of flags
+     */
+    virtual nav_filter_status get_filter_status() const;
+
+    /**
+     * get_origin - returns the inertial navigation origin in lat/lon/alt
+     *
+     * @return origin Location
+     */
+    virtual struct Location get_origin() const { return _ahrs.get_home(); }
+
     //
     // XY Axis specific methods
     //
-
-    /**
-     * position_ok - true if inertial based altitude and position can be trusted
-     * @return
-     */
-    virtual bool position_ok() const;
 
     /**
      * get_position - returns the current position relative to the home location in cm.
@@ -148,12 +158,6 @@ public:
     //
 
     /**
-     * altitude_ok - returns true if inertial based altitude and position can be trusted
-     * @return
-     */
-    virtual bool        altitude_ok() const { return true; }
-
-    /**
      * get_altitude - get latest altitude estimate in cm above the
      * reference position
      * @return
@@ -209,6 +213,11 @@ protected:
      * @param lat : latitude  in 100 nano degrees (i.e. degree value multiplied by 10,000,000)
      */
     void        correct_with_gps(uint32_t now, int32_t lon, int32_t lat);
+
+    /**
+     * check_home - checks if the home position has moved and offsets everything so it still lines up
+     */
+    void check_home();
 
     /**
      * check_gps - checks if new gps readings have arrived and calls correct_with_gps to
@@ -293,6 +302,9 @@ protected:
     GPS_Glitch&             _glitch_detector;           // GPS Glitch detector
     Baro_Glitch&            _baro_glitch;               // Baro glitch detector
     uint8_t                 _error_count;               // number of missed GPS updates
+
+    int32_t                 _last_home_lat;
+    int32_t                 _last_home_lng;
 
 };
 

@@ -55,43 +55,10 @@
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
-// APM HARDWARE
-//
-
-#if defined( __AVR_ATmega1280__ )
- // default choices for a 1280. We can't fit everything in, so we 
- // make some popular choices by default
- #define LOGGING_ENABLED DISABLED
- #ifndef GEOFENCE_ENABLED
- # define GEOFENCE_ENABLED DISABLED
- #endif
- #ifndef CLI_ENABLED
- # define CLI_ENABLED DISABLED
- #endif
- #ifndef MOUNT2
- # define MOUNT2 DISABLED
- #endif
- #ifndef MOUNT
- # define MOUNT DISABLED
- #endif
- #ifndef CAMERA
- # define CAMERA DISABLED
- #endif
- #ifndef FRSKY_TELEM_ENABLED
- # define FRSKY_TELEM_ENABLED DISABLED
- #endif
-#endif
-
-//////////////////////////////////////////////////////////////////////////////
 // sensor types
 
-#define CONFIG_INS_TYPE HAL_INS_DEFAULT
 #define CONFIG_BARO     HAL_BARO_DEFAULT
 #define CONFIG_COMPASS  HAL_COMPASS_DEFAULT
-
-#ifdef HAL_SERIAL0_BAUD_DEFAULT
-# define SERIAL0_BAUD HAL_SERIAL0_BAUD_DEFAULT
-#endif
 
 //////////////////////////////////////////////////////////////////////////////
 // HIL_MODE                                 OPTIONAL
@@ -103,27 +70,12 @@
 #if HIL_MODE != HIL_MODE_DISABLED       // we are in HIL mode
  #undef CONFIG_BARO
  #define CONFIG_BARO HAL_BARO_HIL
- #undef CONFIG_INS_TYPE
- #define CONFIG_INS_TYPE HAL_INS_HIL
  #undef  CONFIG_COMPASS
  #define CONFIG_COMPASS HAL_COMPASS_HIL
 #endif
 
 #ifndef MAV_SYSTEM_ID
  # define MAV_SYSTEM_ID          1
-#endif
-
-//////////////////////////////////////////////////////////////////////////////
-// Serial port speeds.
-//
-#ifndef SERIAL0_BAUD
- # define SERIAL0_BAUD                   115200
-#endif
-#ifndef SERIAL1_BAUD
- # define SERIAL1_BAUD                    57600
-#endif
-#ifndef SERIAL2_BAUD
- # define SERIAL2_BAUD                    57600
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
@@ -135,6 +87,18 @@
  # define FRSKY_TELEM_ENABLED DISABLED
 #else
  # define FRSKY_TELEM_ENABLED ENABLED
+#endif
+#endif
+
+//////////////////////////////////////////////////////////////////////////////
+// Optical flow sensor support
+//
+
+#ifndef OPTFLOW
+#if AP_AHRS_NAVEKF_AVAILABLE
+ # define OPTFLOW ENABLED
+#else
+ # define OPTFLOW DISABLED
 #endif
 #endif
 
@@ -296,15 +260,9 @@
 //////////////////////////////////////////////////////////////////////////////
 // MOUNT (ANTENNA OR CAMERA)
 //
-// uses 4174 bytes of memory on 1280 chips (MNT_JSTICK_SPD_OPTION, MNT_RETRACT_OPTION, MNT_STABILIZE_OPTION and MNT_MOUNT2_OPTION disabled)
 // uses 7726 bytes of memory on 2560 chips (all options are enabled)
 #ifndef MOUNT
  # define MOUNT          ENABLED
-#endif
-
-// second mount, can for example be used to keep an antenna pointed at the home position
-#ifndef MOUNT2
- # define MOUNT2         DISABLED
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
@@ -428,7 +386,7 @@
 // Navigation defaults
 //
 #ifndef WP_RADIUS_DEFAULT
- # define WP_RADIUS_DEFAULT              30
+ # define WP_RADIUS_DEFAULT              90
 #endif
 
 #ifndef LOITER_RADIUS_DEFAULT
@@ -448,6 +406,10 @@
  # define INVERTED_FLIGHT_PWM 1750
 #endif
 
+#ifndef PX4IO_OVERRIDE_PWM
+ # define PX4IO_OVERRIDE_PWM 1750
+#endif
+
 //////////////////////////////////////////////////////////////////////////////
 // Developer Items
 //
@@ -456,9 +418,14 @@
  # define SCALING_SPEED          15.0
 #endif
 
-// use this to completely disable the CLI
+// use this to completely disable the CLI. We now default the CLI to
+// off on smaller boards.
 #ifndef CLI_ENABLED
+#if HAL_CPU_CLASS > HAL_CPU_CLASS_16
  # define CLI_ENABLED ENABLED
+#else
+ # define CLI_ENABLED DISABLE
+#endif
 #endif
 
 // use this to disable geo-fencing
@@ -494,16 +461,8 @@
 #endif
 #endif
 
-#ifndef SERIAL_BUFSIZE
- # define SERIAL_BUFSIZE 512
-#endif
-
-#ifndef SERIAL1_BUFSIZE
- # define SERIAL1_BUFSIZE 256
-#endif
-
-#ifndef SERIAL2_BUFSIZE
- # define SERIAL2_BUFSIZE 256
+#if OBC_FAILSAFE == ENABLED && HAL_CPU_CLASS < HAL_CPU_CLASS_75
+#define CLI_ENABLED DISABLED
 #endif
 
 /*

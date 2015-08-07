@@ -16,6 +16,7 @@
 #include <termios.h>
 #include <drivers/drv_hrt.h>
 #include <assert.h>
+#include "../AP_HAL/utility/RingBuffer.h"
 
 using namespace PX4;
 
@@ -150,9 +151,11 @@ void PX4UARTDriver::begin(uint32_t b, uint16_t rxS, uint16_t txS)
         }
         _initialised = true;
     }
+    _uart_owner_pid = getpid();
+
 }
 
-void PX4UARTDriver::set_flow_control(enum flow_control flow_control)
+void PX4UARTDriver::set_flow_control(enum flow_control fcontrol)
 {
 	if (_fd == -1) {
         return;
@@ -160,13 +163,13 @@ void PX4UARTDriver::set_flow_control(enum flow_control flow_control)
     struct termios t;
     tcgetattr(_fd, &t);
     // we already enabled CRTS_IFLOW above, just enable output flow control
-    if (flow_control != FLOW_CONTROL_DISABLE) {
+    if (fcontrol != FLOW_CONTROL_DISABLE) {
         t.c_cflag |= CRTSCTS;
     } else {
         t.c_cflag &= ~CRTSCTS;
     }
     tcsetattr(_fd, TCSANOW, &t);
-    _flow_control = flow_control;
+    _flow_control = fcontrol;
 }
 
 void PX4UARTDriver::begin(uint32_t b) 
@@ -190,7 +193,7 @@ void PX4UARTDriver::try_initialise(void)
         return;
     }
     _last_initialise_attempt_ms = hal.scheduler->millis();
-    if (hal.util->safety_switch_state() != AP_HAL::Util::SAFETY_ARMED) {
+    if (hal.util->safety_switch_state() != AP_HAL::Util::SAFETY_ARMED || !hal.util->get_soft_armed()) {
         begin(0);
     }
 }
@@ -235,15 +238,6 @@ void PX4UARTDriver::set_blocking_writes(bool blocking)
 bool PX4UARTDriver::tx_pending() { return false; }
 
 /*
-  buffer handling macros
- */
-#define BUF_AVAILABLE(buf) ((buf##_head > (_tail=buf##_tail))? (buf##_size - buf##_head) + _tail: _tail - buf##_head)
-#define BUF_SPACE(buf) (((_head=buf##_head) > buf##_tail)?(_head - buf##_tail) - 1:((buf##_size - buf##_tail) + _head) - 1)
-#define BUF_EMPTY(buf) (buf##_head == buf##_tail)
-#define BUF_ADVANCETAIL(buf, n) buf##_tail = (buf##_tail + n) % buf##_size
-#define BUF_ADVANCEHEAD(buf, n) buf##_head = (buf##_head + n) % buf##_size
-
-/*
   return number of bytes available to be read from the buffer
  */
 int16_t PX4UARTDriver::available() 
@@ -275,6 +269,9 @@ int16_t PX4UARTDriver::txspace()
 int16_t PX4UARTDriver::read() 
 { 
 	uint8_t c;
+    if (_uart_owner_pid != getpid()){
+        return -1;
+    }
     if (!_initialised) {
         try_initialise();
         return -1;
@@ -295,12 +292,11 @@ int16_t PX4UARTDriver::read()
  */
 size_t PX4UARTDriver::write(uint8_t c) 
 { 
-    if (!_initialised) {
-        try_initialise();
+    if (_uart_owner_pid != getpid()){
         return 0;
     }
-    if (hal.scheduler->in_timerprocess()) {
-        // not allowed from timers
+    if (!_initialised) {
+        try_initialise();
         return 0;
     }
     uint16_t _head;
@@ -321,14 +317,13 @@ size_t PX4UARTDriver::write(uint8_t c)
  */
 size_t PX4UARTDriver::write(const uint8_t *buffer, size_t size)
 {
+    if (_uart_owner_pid != getpid()){
+        return 0;
+    }
 	if (!_initialised) {
         try_initialise();
 		return 0;
 	}
-    if (hal.scheduler->in_timerprocess()) {
-        // not allowed from timers
-        return 0;
-    }
 
     if (!_nonblocking_writes) {
         /*
@@ -495,13 +490,13 @@ void PX4UARTDriver::_timer_tick(void)
     uint16_t _tail;
     n = BUF_AVAILABLE(_writebuf);
     if (n > 0) {
+        uint16_t n1 = _writebuf_size - _writebuf_head;
         perf_begin(_perf_uart);
-        if (_tail > _writebuf_head) {
+        if (n1 >= n) {
             // do as a single write
             _write_fd(&_writebuf[_writebuf_head], n);
         } else {
             // split into two writes
-            uint16_t n1 = _writebuf_size - _writebuf_head;
             int ret = _write_fd(&_writebuf[_writebuf_head], n1);
             if (ret == n1 && n > n1) {
                 _write_fd(&_writebuf[_writebuf_head], n - n1);                
@@ -514,13 +509,13 @@ void PX4UARTDriver::_timer_tick(void)
     uint16_t _head;
     n = BUF_SPACE(_readbuf);
     if (n > 0) {
+        uint16_t n1 = _readbuf_size - _readbuf_tail;
         perf_begin(_perf_uart);
-        if (_readbuf_tail < _head) {
+        if (n1 >= n) {
             // one read will do
             assert(_readbuf_tail+n <= _readbuf_size);
             _read_fd(&_readbuf[_readbuf_tail], n);
         } else {
-            uint16_t n1 = _readbuf_size - _readbuf_tail;
             assert(_readbuf_tail+n1 <= _readbuf_size);
             int ret = _read_fd(&_readbuf[_readbuf_tail], n1);
             if (ret == n1 && n > n1) {

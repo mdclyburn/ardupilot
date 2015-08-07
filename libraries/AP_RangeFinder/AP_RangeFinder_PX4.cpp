@@ -16,7 +16,7 @@
 
 #include <AP_HAL.h>
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_PX4
+#if CONFIG_HAL_BOARD == HAL_BOARD_PX4 || CONFIG_HAL_BOARD == HAL_BOARD_VRBRAIN
 #include "AP_RangeFinder_PX4.h"
 
 #include <sys/types.h>
@@ -39,7 +39,9 @@ uint8_t AP_RangeFinder_PX4::num_px4_instances = 0;
    already know that we should setup the rangefinder
 */
 AP_RangeFinder_PX4::AP_RangeFinder_PX4(RangeFinder &_ranger, uint8_t instance, RangeFinder::RangeFinder_State &_state) :
-    AP_RangeFinder_Backend(_ranger, instance, _state)
+	AP_RangeFinder_Backend(_ranger, instance, _state),
+    _last_max_distance_cm(-1),
+    _last_min_distance_cm(-1)
 {
     _fd = open_driver();
 
@@ -78,12 +80,8 @@ AP_RangeFinder_PX4::~AP_RangeFinder_PX4()
 int AP_RangeFinder_PX4::open_driver(void)
 {
     // work out the device path based on how many PX4 drivers we have loaded
-    char path[] = RANGE_FINDER_DEVICE_PATH "n";
-    if (num_px4_instances == 0) {
-        path[strlen(path)-1] = 0;
-    } else {
-        path[strlen(path)-1] = '1' + (num_px4_instances-1);
-    }
+    char path[] = RANGE_FINDER_BASE_DEVICE_PATH "n";
+    path[strlen(path)-1] = '0' + num_px4_instances;
     return open(path, O_RDONLY);
 }
 
@@ -110,6 +108,18 @@ void AP_RangeFinder_PX4::update(void)
     struct range_finder_report range_report;
     float sum = 0;
     uint16_t count = 0;
+
+    if (_last_max_distance_cm != ranger._max_distance_cm[state.instance] ||
+        _last_min_distance_cm != ranger._min_distance_cm[state.instance]) {
+        float max_distance = ranger._max_distance_cm[state.instance]*0.01f;
+        float min_distance = ranger._min_distance_cm[state.instance]*0.01f;
+        if (ioctl(_fd, RANGEFINDERIOCSETMAXIUMDISTANCE, (unsigned long)&max_distance) == 0 &&
+            ioctl(_fd, RANGEFINDERIOCSETMINIUMDISTANCE, (unsigned long)&min_distance) == 0) {
+            _last_max_distance_cm = ranger._max_distance_cm[state.instance];
+            _last_min_distance_cm = ranger._min_distance_cm[state.instance];
+        }
+    }
+
 
     while (::read(_fd, &range_report, sizeof(range_report)) == sizeof(range_report) &&
            range_report.timestamp != _last_timestamp) {

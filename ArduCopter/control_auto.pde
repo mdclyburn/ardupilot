@@ -20,7 +20,9 @@
 // auto_init - initialise auto controller
 static bool auto_init(bool ignore_checks)
 {
-    if ((GPS_ok() && inertial_nav.position_ok() && mission.num_commands() > 1) || ignore_checks) {
+    if ((position_ok() && mission.num_commands() > 1) || ignore_checks) {
+        auto_mode = Auto_Loiter;
+
         // stop ROI from carrying over from previous runs of the mission
         // To-Do: reset the yaw as part of auto_wp_start when the previous command was not a wp command to remove the need for this special ROI check
         if (auto_yaw_mode == AUTO_YAW_ROI) {
@@ -29,6 +31,9 @@ static bool auto_init(bool ignore_checks)
 
         // initialise waypoint and spline controller
         wp_nav.wp_and_spline_init();
+
+        // clear guided limits
+        guided_limit_clear();
 
         // start/resume the mission (based on MIS_RESTART parameter)
         mission.start_or_resume();
@@ -71,22 +76,26 @@ static void auto_run()
         auto_spline_run();
         break;
 
-#if NAV_GUIDED == ENABLED
     case Auto_NavGuided:
+#if NAV_GUIDED == ENABLED
         auto_nav_guided_run();
-        break;
 #endif
+        break;
+
+    case Auto_Loiter:
+        auto_loiter_run();
+        break;
     }
 }
 
 // auto_takeoff_start - initialises waypoint controller to implement take-off
-static void auto_takeoff_start(float final_alt)
+static void auto_takeoff_start(float final_alt_above_home)
 {
     auto_mode = Auto_TakeOff;
 
     // initialise wpnav destination
     Vector3f target_pos = inertial_nav.get_position();
-    target_pos.z = final_alt;
+    target_pos.z = pv_alt_above_origin(final_alt_above_home);
     wp_nav.set_wp_destination(target_pos);
 
     // initialise yaw
@@ -102,13 +111,14 @@ static void auto_takeoff_run()
 {
     // if not auto armed set throttle to zero and exit immediately
     if(!ap.auto_armed) {
+        // initialise wpnav targets
+        wp_nav.shift_wp_origin_to_current_pos();
         // reset attitude control targets
         attitude_control.relax_bf_rate_controller();
         attitude_control.set_yaw_target_to_current_heading();
         attitude_control.set_throttle_out(0, false);
         // tell motors to do a slow start
         motors.slow_start(true);
-        // To-Do: re-initialise wpnav targets
         return;
     }
 
@@ -287,6 +297,11 @@ static void auto_land_run()
         return;
     }
 
+    // relax loiter targets if we might be landed
+    if (land_complete_maybe()) {
+        wp_nav.loiter_soften_for_landing();
+    }
+
     // process pilot's input
     if (!failsafe.radio) {
         if (g.land_repositioning) {
@@ -306,11 +321,15 @@ static void auto_land_run()
     wp_nav.set_pilot_desired_acceleration(roll_control, pitch_control);
 
     // run loiter controller
-    wp_nav.update_loiter();
+    wp_nav.update_loiter(ekfGndSpdLimit, ekfNavVelGainScaler);
 
     // call z-axis position controller
-    pos_control.set_alt_target_from_climb_rate(get_throttle_land(), G_Dt);
+    float cmb_rate = get_land_descent_speed();
+    pos_control.set_alt_target_from_climb_rate(cmb_rate, G_Dt, true);
     pos_control.update_z_controller();
+
+    // record desired climb rate for logging
+    desired_climb_rate = cmb_rate;
 
     // roll & pitch from waypoint controller, yaw rate from pilot
     attitude_control.angle_ef_roll_pitch_rate_ef_yaw(wp_nav.get_roll(), wp_nav.get_pitch(), target_yaw_rate);
@@ -392,6 +411,9 @@ void auto_nav_guided_start()
 
     // call regular guided flight mode initialisation
     guided_init(true);
+
+    // initialise guided start time and position as reference for limit checking
+    guided_limit_init_time_and_pos();
 }
 
 // auto_nav_guided_run - allows control by external navigation controller
@@ -402,6 +424,56 @@ void auto_nav_guided_run()
     guided_run();
 }
 #endif  // NAV_GUIDED
+
+// auto_loiter_start - initialises loitering in auto mode
+//  returns success/failure because this can be called by exit_mission
+bool auto_loiter_start()
+{
+    // return failure if GPS is bad
+    if (!position_ok()) {
+        return false;
+    }
+    auto_mode = Auto_Loiter;
+
+    Vector3f origin = inertial_nav.get_position();
+
+    // calculate stopping point
+    Vector3f stopping_point;
+    pos_control.get_stopping_point_xy(stopping_point);
+    pos_control.get_stopping_point_z(stopping_point);
+
+    // initialise waypoint controller target to stopping point
+    wp_nav.set_wp_origin_and_destination(origin, stopping_point);
+
+    // hold yaw at current heading
+    set_auto_yaw_mode(AUTO_YAW_HOLD);
+
+    return true;
+}
+
+// auto_loiter_run - loiter in AUTO flight mode
+//      called by auto_run at 100hz or more
+void auto_loiter_run()
+{
+    // if not auto armed set throttle to zero and exit immediately
+    if(!ap.auto_armed || ap.land_complete) {
+        attitude_control.relax_bf_rate_controller();
+        attitude_control.set_yaw_target_to_current_heading();
+        attitude_control.set_throttle_out(0, false);
+        return;
+    }
+
+    // accept pilot input of yaw
+    float target_yaw_rate = 0;
+    if(!failsafe.radio) {
+        target_yaw_rate = get_pilot_desired_yaw_rate(g.rc_4.control_in);
+    }
+
+    // run waypoint and z-axis postion controller
+    wp_nav.update_wpnav();
+    pos_control.update_z_controller();
+    attitude_control.angle_ef_roll_pitch_rate_ef_yaw(wp_nav.get_roll(), wp_nav.get_pitch(), target_yaw_rate);
+}
 
 // get_default_auto_yaw_mode - returns auto_yaw_mode based on WP_YAW_BEHAVIOR parameter
 // set rtl parameter to true if this is during an RTL
@@ -469,8 +541,8 @@ void set_auto_yaw_mode(uint8_t yaw_mode)
     }
 }
 
-// set_auto_yaw_look_at_heading - sets the yaw look at heading for auto mode 
-static void set_auto_yaw_look_at_heading(float angle_deg, float turn_rate_dps, uint8_t relative_angle)
+// set_auto_yaw_look_at_heading - sets the yaw look at heading for auto mode
+static void set_auto_yaw_look_at_heading(float angle_deg, float turn_rate_dps, int8_t direction, uint8_t relative_angle)
 {
     // get current yaw target
     int32_t curr_yaw_target = attitude_control.angle_ef_targets().z;
@@ -481,7 +553,10 @@ static void set_auto_yaw_look_at_heading(float angle_deg, float turn_rate_dps, u
         yaw_look_at_heading = wrap_360_cd(angle_deg * 100);
     } else {
         // relative angle
-        yaw_look_at_heading = wrap_360_cd(angle_deg * 100);
+        if (direction < 0) {
+            angle_deg = -angle_deg;
+        }
+        yaw_look_at_heading = wrap_360_cd((angle_deg*100+curr_yaw_target));
     }
 
     // get turn speed
@@ -503,7 +578,7 @@ static void set_auto_yaw_look_at_heading(float angle_deg, float turn_rate_dps, u
 static void set_auto_yaw_roi(const Location &roi_location)
 {
     // if location is zero lat, lon and altitude turn off ROI
-    if (auto_yaw_mode == AUTO_YAW_ROI && (roi_location.alt == 0 && roi_location.lat == 0 && roi_location.lng == 0)) {
+    if (roi_location.alt == 0 && roi_location.lat == 0 && roi_location.lng == 0) {
         // set auto yaw mode back to default assuming the active command is a waypoint command.  A more sophisticated method is required to ensure we return to the proper yaw control for the active command
         set_auto_yaw_mode(get_default_auto_yaw_mode(false));
 #if MOUNT == ENABLED
@@ -515,12 +590,12 @@ static void set_auto_yaw_roi(const Location &roi_location)
     }else{
 #if MOUNT == ENABLED
         // check if mount type requires us to rotate the quad
-        if(camera_mount.get_mount_type() != AP_Mount::k_pan_tilt && camera_mount.get_mount_type() != AP_Mount::k_pan_tilt_roll) {
+        if(!camera_mount.has_pan_control()) {
             roi_WP = pv_location_to_vector(roi_location);
             set_auto_yaw_mode(AUTO_YAW_ROI);
         }
         // send the command to the camera mount
-        camera_mount.set_roi_cmd(&roi_location);
+        camera_mount.set_roi_target(roi_location);
 
         // TO-DO: expand handling of the do_nav_roi to support all modes of the MAVLink.  Currently we only handle mode 4 (see below)
         //      0: do nothing

@@ -52,19 +52,18 @@ test_mode(uint8_t argc, const Menu::arg *argv)
 static int8_t
 test_baro(uint8_t argc, const Menu::arg *argv)
 {
-    int32_t alt;
     print_hit_enter();
     init_barometer(true);
 
     while(1) {
         delay(100);
-        alt = read_barometer();
+        read_barometer();
 
         if (!barometer.healthy()) {
             cliSerial->println_P(PSTR("not healthy"));
         } else {
             cliSerial->printf_P(PSTR("Alt: %0.2fm, Raw: %f Temperature: %.1f\n"),
-                                alt / 100.0,
+                                baro_alt / 100.0,
                                 barometer.get_pressure(), 
                                 barometer.get_temperature());
         }
@@ -96,6 +95,9 @@ test_compass(uint8_t argc, const Menu::arg *argv)
     ahrs.init();
     ahrs.set_fly_forward(true);
     ahrs.set_compass(&compass);
+#if OPTFLOW == ENABLED
+    ahrs.set_optflow(&optflow);
+#endif
     report_compass();
 
     // we need the AHRS initialised for this test
@@ -198,17 +200,18 @@ static int8_t
 test_optflow(uint8_t argc, const Menu::arg *argv)
 {
 #if OPTFLOW == ENABLED
-    if(g.optflow_enabled) {
-        cliSerial->printf_P(PSTR("man id: %d\t"),optflow.read_register(ADNS3080_PRODUCT_ID));
+    if(optflow.enabled()) {
+        cliSerial->printf_P(PSTR("dev id: %d\t"),(int)optflow.device_id());
         print_hit_enter();
 
         while(1) {
             delay(200);
             optflow.update();
-            cliSerial->printf_P(PSTR("dx:%d\t dy:%d\t squal:%d\n"),
-                            optflow.dx,
-                            optflow.dy,
-                            optflow.surface_quality);
+            const Vector2f& flowRate = optflow.flowRate();
+            cliSerial->printf_P(PSTR("flowX : %7.4f\t flowY : %7.4f\t flow qual : %d\n"),
+                            flowRate.x,
+                            flowRate.y,
+                            (int)optflow.quality());
 
             if(cliSerial->available() > 0) {
                 return (0);

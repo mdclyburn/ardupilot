@@ -109,6 +109,8 @@ then
 fi
 
 
+echo "Trying PX4IO board"
+
 # try the px4io start twice. Some FMUv2 board don't
 # come up the first time
 set HAVE_PX4IO false
@@ -146,6 +148,16 @@ then
         echo "PX4IO CRC failure"
         echo "PX4IO CRC failure" >> $logfile    
         tone_alarm MBABGP
+
+        if px4io safety_on
+        then
+            echo "PX4IO disarm OK"
+        else
+            echo "PX4IO disarm failed"
+        fi
+
+        sleep 1
+
         if px4io forceupdate 14662 /etc/px4io/px4io.bin
         then
                sleep 1
@@ -181,24 +193,30 @@ then
         echo "Setting FMU mode_serial"
         fmu mode_serial
 else
-        echo "Setting FMU mode_pwm"
-        fmu mode_pwm
+        if fmu mode_pwm4
+        then
+                echo "Set FMU mode_pwm4"
+        fi
 fi
 
 
 echo "Starting APM sensors"
+
 if ms5611 start
 then
-    echo "ms5611 started OK"
+   echo "ms5611 started OK"
 else
-    sh /etc/init.d/rc.error
+   echo "no ms5611 found"
+   echo "No ms5611 found" >> $logfile
+   sh /etc/init.d/rc.error
 fi
 
 if adc start
 then
-    echo "adc started OK"
+   echo "adc started OK"
 else
-    sh /etc/init.d/rc.error
+   echo "No adc" >> $logfile
+   sh /etc/init.d/rc.error
 fi
 
 if [ $BOARD == FMUv1 ]
@@ -259,15 +277,6 @@ else
     fi
     if [ $HAVE_FMUV3 == true ]
     then
-        # internal MPU6000 is rotated ROLL_180_YAW_270 from standard
-        if mpu6000 -R 14 start
-        then
-               echo "Found MPU6000 internal"
-        else
-               echo "No MPU6000"
-               echo "No MPU6000" >> $logfile
-               sh /etc/init.d/rc.error
-        fi
         # external L3GD20 is rotated YAW_180 from standard
         if l3gd20 -X -R 4 start
         then
@@ -282,6 +291,15 @@ else
                echo "lsm303d external started OK"
         else
                echo "No lsm303d"
+               sh /etc/init.d/rc.error
+        fi
+        # internal MPU6000 is rotated ROLL_180_YAW_270 from standard
+        if mpu6000 -R 14 start
+        then
+               echo "Found MPU6000 internal"
+        else
+               echo "No MPU6000"
+               echo "No MPU6000" >> $logfile
                sh /etc/init.d/rc.error
         fi
     else
@@ -319,14 +337,36 @@ then
 fi
 
 # optional Range Finder sensor
-if ll40ls start
+if ll40ls -X start
 then
-    echo "Found ll40ls sensor"
+    echo "Found external ll40ls sensor"
+fi
+
+if ll40ls -I start
+then
+    echo "Found internal ll40ls sensor"
+fi
+
+if trone start
+then
+    echo "Found trone sensor"
 fi
 
 if mb12xx start
 then
     echo "Found mb12xx sensor"
+fi
+
+# optional PX4Flow sensor
+if px4flow start
+then
+    echo "Found px4flow sensor"
+fi
+
+# optional PWM input driver
+if pwm_input start
+then
+    echo "started pwm_input driver"
 fi
 
 echo "Trying PX4IO board"
@@ -347,6 +387,22 @@ else
     echo "failed to read mtd"
     echo "failed to read mtd" >> $logfile
     sh /etc/init.d/rc.error           
+fi
+
+if [ -f /bin/uavcan ]
+then
+    if uavcan start 1
+    then
+        echo "started uavcan OK"
+    else
+        echo "failed to start uavcan"
+    fi
+fi
+
+# optional smbus battery monitor
+if batt_smbus -b 2 start
+then
+    echo "Found batt_smbus"
 fi
 
 if [ $BOARD == FMUv2 ]

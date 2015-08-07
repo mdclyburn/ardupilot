@@ -1,7 +1,5 @@
 /// -*- tab-width: 4; Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
-// counter to verify landings
-static uint16_t land_detector;
 static bool land_with_gps;
 
 static uint32_t land_start_time;
@@ -11,7 +9,7 @@ static bool land_pause;
 static bool land_init(bool ignore_checks)
 {
     // check if we have GPS and decide which LAND we're going to do
-    land_with_gps = GPS_ok();
+    land_with_gps = position_ok();
     if (land_with_gps) {
         // set target to stopping point
         Vector3f stopping_point;
@@ -61,7 +59,7 @@ static void land_gps_run()
 
 #if LAND_REQUIRE_MIN_THROTTLE_TO_DISARM == ENABLED
         // disarm when the landing detector says we've landed and throttle is at minimum
-        if (ap.land_complete && (g.rc_3.control_in == 0 || failsafe.radio)) {
+        if (ap.land_complete && (ap.throttle_zero || failsafe.radio)) {
             init_disarm_motors();
         }
 #else
@@ -71,6 +69,11 @@ static void land_gps_run()
         }
 #endif
         return;
+    }
+
+    // relax loiter target if we might be landed
+    if (land_complete_maybe()) {
+        wp_nav.loiter_soften_for_landing();
     }
 
     // process pilot inputs
@@ -92,22 +95,25 @@ static void land_gps_run()
     wp_nav.set_pilot_desired_acceleration(roll_control, pitch_control);
 
     // run loiter controller
-    wp_nav.update_loiter();
+    wp_nav.update_loiter(ekfGndSpdLimit, ekfNavVelGainScaler);
 
     // call attitude controller
     attitude_control.angle_ef_roll_pitch_rate_ef_yaw(wp_nav.get_roll(), wp_nav.get_pitch(), target_yaw_rate);
 
-    //pause 4 seconds before beginning land descent
+    // pause 4 seconds before beginning land descent
     float cmb_rate;
     if(land_pause && millis()-land_start_time < 4000) {
         cmb_rate = 0;
     } else {
         land_pause = false;
-        cmb_rate = get_throttle_land();
+        cmb_rate = get_land_descent_speed();
     }
 
+    // record desired climb rate for logging
+    desired_climb_rate = cmb_rate;
+
     // update altitude target and call position controller
-    pos_control.set_alt_target_from_climb_rate(cmb_rate, G_Dt);
+    pos_control.set_alt_target_from_climb_rate(cmb_rate, G_Dt, true);
     pos_control.update_z_controller();
 }
 
@@ -126,7 +132,7 @@ static void land_nogps_run()
         attitude_control.set_throttle_out(0, false);
 #if LAND_REQUIRE_MIN_THROTTLE_TO_DISARM == ENABLED
         // disarm when the landing detector says we've landed and throttle is at minimum
-        if (ap.land_complete && (g.rc_3.control_in == 0 || failsafe.radio)) {
+        if (ap.land_complete && (ap.throttle_zero || failsafe.radio)) {
             init_disarm_motors();
         }
 #else
@@ -155,24 +161,27 @@ static void land_nogps_run()
     // call attitude controller
     attitude_control.angle_ef_roll_pitch_rate_ef_yaw_smooth(target_roll, target_pitch, target_yaw_rate, get_smoothing_gain());
 
-    //pause 4 seconds before beginning land descent
+    // pause 4 seconds before beginning land descent
     float cmb_rate;
     if(land_pause && millis()-land_start_time < LAND_WITH_DELAY_MS) {
         cmb_rate = 0;
     } else {
         land_pause = false;
-        cmb_rate = get_throttle_land();
+        cmb_rate = get_land_descent_speed();
     }
 
+    // record desired climb rate for logging
+    desired_climb_rate = cmb_rate;
+
     // call position controller
-    pos_control.set_alt_target_from_climb_rate(cmb_rate, G_Dt);
+    pos_control.set_alt_target_from_climb_rate(cmb_rate, G_Dt, true);
     pos_control.update_z_controller();
 }
 
-// get_throttle_land - high level landing logic
+// get_land_descent_speed - high level landing logic
 //      returns climb rate (in cm/s) which should be passed to the position controller
 //      should be called at 100hz or higher
-static float get_throttle_land()
+static float get_land_descent_speed()
 {
 #if CONFIG_SONAR == ENABLED
     bool sonar_ok = sonar_enabled && sonar.healthy();
@@ -180,35 +189,10 @@ static float get_throttle_land()
     bool sonar_ok = false;
 #endif
     // if we are above 10m and the sonar does not sense anything perform regular alt hold descent
-    if (current_loc.alt >= LAND_START_ALT && !(sonar_ok && sonar_alt_health >= SONAR_ALT_HEALTH_MAX)) {
+    if (pos_control.get_pos_target().z >= pv_alt_above_origin(LAND_START_ALT) && !(sonar_ok && sonar_alt_health >= SONAR_ALT_HEALTH_MAX)) {
         return pos_control.get_speed_down();
     }else{
         return -abs(g.land_speed);
-    }
-}
-
-// update_land_detector - checks if we have landed and updates the ap.land_complete flag
-// called at 50hz
-static void update_land_detector()
-{
-    // detect whether we have landed by watching for low climb rate and minimum throttle
-    if (abs(climb_rate) < 40 && motors.limit.throttle_lower) {
-        if (!ap.land_complete) {
-            // increase counter until we hit the trigger then set land complete flag
-            if( land_detector < LAND_DETECTOR_TRIGGER) {
-                land_detector++;
-            }else{
-                set_land_complete(true);
-                land_detector = 0;
-            }
-        }
-    } else {
-        // we've sensed movement up or down so reset land_detector
-        land_detector = 0;
-        // if throttle output is high then clear landing flag
-        if (motors.get_throttle_out() > get_non_takeoff_throttle()) {
-            set_land_complete(false);
-        }
     }
 }
 
@@ -221,8 +205,17 @@ static void land_do_not_use_GPS()
 }
 
 // set_mode_land_with_pause - sets mode to LAND and triggers 4 second delay before descent starts
+//  this is always called from a failsafe so we trigger notification to pilot
 static void set_mode_land_with_pause()
 {
     set_mode(LAND);
     land_pause = true;
+
+    // alert pilot to mode change
+    AP_Notify::events.failsafe_mode_change = 1;
+}
+
+// landing_with_GPS - returns true if vehicle is landing using GPS
+static bool landing_with_GPS() {
+    return (control_mode == LAND && land_with_gps);
 }
