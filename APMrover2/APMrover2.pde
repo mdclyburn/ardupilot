@@ -55,6 +55,7 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <time.h>
 
 // Libraries
 #include <AP_Common.h>
@@ -750,7 +751,7 @@ static void one_second_loop(void)
         counter = 0;
     }
 
-	log_depth();
+	log_location();
 }
 
 static void update_GPS_50Hz(void)
@@ -908,35 +909,38 @@ static void update_navigation()
 	}
 }
 
-void log_depth()
+void log_location()
 {
-	// Print out data out to telemetry log.
-	// e.g.: gcs_send_text_P(SEVERITY_LOW, PSTR("Bah."));
-	// e.g.: gcs_send_text_fmt(PSTR("Bah. %d"), 0);
+	FILE* const log_file = fopen("location.log", "a");
+	if(log_file == NULL)
+	{
+		printf("WARNING: could not open log file.\n");
+		return;
+	}
 
-	// Ensure GPS is available.
 	AP_GPS::GPS_Status status = gps.status();
-
-	double lat = (double) current_loc.lat / 10000000;
-	double lng = (double) current_loc.lng / 10000000;
-
 	switch(status)
 	{
+		// No location fix is available.
 		case AP_GPS::NO_GPS:
 		case AP_GPS::NO_FIX:
-			gcs_send_text_fmt(PSTR("DEPTH %d %d %d"), 0, 0, 0);
+			fprintf(log_file, "%u NO GPS FIX\n", (unsigned) time(NULL));
 			break;
 		case AP_GPS::GPS_OK_FIX_2D:
 		case AP_GPS::GPS_OK_FIX_3D:
-			// Hardware unavailable for testing at the moment. Data will come
-			// out as 'DEPTH <depth> <latitude> <longitude>'.
-			gcs_send_text_fmt(PSTR("DEPTH <depth> %lf %lf"), lat, lng);
+		{
+			double lat = (double) current_loc.lat / 10000000;
+			double lng = (double) current_loc.lng / 10000000;
+			fprintf(log_file, "%u %lf %lf\n", (unsigned) time(NULL), lat, lng);
 			break;
+		}
 		default:
 			break;
 	}
 
-	return;  
+	fclose(log_file);
+
+	return;
 }
 
 AP_HAL_MAIN();
