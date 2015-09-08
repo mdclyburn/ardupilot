@@ -221,14 +221,14 @@ static void set_servos(void)
             // suppress throttle if in failsafe and manual
             channel_throttle->radio_out = channel_throttle->radio_trim;
         }
-	} else {       
+	} else {
         channel_steer->calc_pwm();
         if (in_reverse) {
-            channel_throttle->servo_out = constrain_int16(channel_throttle->servo_out, 
+            channel_throttle->servo_out = constrain_int16(channel_throttle->servo_out,
                                                           -g.throttle_max,
                                                           -g.throttle_min);
         } else {
-            channel_throttle->servo_out = constrain_int16(channel_throttle->servo_out, 
+            channel_throttle->servo_out = constrain_int16(channel_throttle->servo_out,
                                                           g.throttle_min.get(), 
                                                           g.throttle_max.get());
         }

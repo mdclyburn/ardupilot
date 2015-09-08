@@ -215,20 +215,20 @@ static void set_servos(void)
 
 	if (control_mode == MANUAL || control_mode == LEARNING) {
         // do a direct pass through of radio values
-        channel_steer->radio_out       = channel_steer->read();
+        channel_steer->radio_out       = 3000 - channel_steer->read();
         channel_throttle->radio_out    = channel_throttle->read();
         if (failsafe.bits & FAILSAFE_EVENT_THROTTLE) {
             // suppress throttle if in failsafe and manual
             channel_throttle->radio_out = channel_throttle->radio_trim;
         }
-	} else {       
+	} else {
         channel_steer->calc_pwm();
         if (in_reverse) {
-            channel_throttle->servo_out = constrain_int16(channel_throttle->servo_out, 
+            channel_throttle->servo_out = 3000 - constrain_int16(channel_throttle->servo_out,
                                                           -g.throttle_max,
                                                           -g.throttle_min);
         } else {
-            channel_throttle->servo_out = constrain_int16(channel_throttle->servo_out, 
+            channel_throttle->servo_out = 3000 - constrain_int16(channel_throttle->servo_out,
                                                           g.throttle_min.get(), 
                                                           g.throttle_max.get());
         }
