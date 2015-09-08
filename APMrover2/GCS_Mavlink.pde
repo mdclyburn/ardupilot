@@ -663,7 +663,7 @@ bool GCS_MAVLINK::stream_trigger(enum streams stream_num)
         if (rate > 50) {
             rate = 50;
         }
-        stream_ticks[stream_num] = (50 / rate) - 1 + stream_slowdown;
+        stream_ticks[stream_num] = (50 / rate) + stream_slowdown;
         return true;
     }
 
@@ -923,14 +923,6 @@ void GCS_MAVLINK::handleMessage(mavlink_message_t* msg)
                 result = MAV_RESULT_ACCEPTED;
             }
             break;
-
-        case MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES: {
-            if (packet.param1 == 1) {
-                gcs[chan-MAVLINK_COMM_0].send_autopilot_version();
-                result = MAV_RESULT_ACCEPTED;
-            }
-            break;
-        }
 
         default:
                 break;
