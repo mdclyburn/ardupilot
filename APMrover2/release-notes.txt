@@ -31,7 +31,6 @@ The changes in this release are:
   - Added AK8963 MAG support (thanks Staroselskii Georgii)
   - Added support for second battery
   - Auto formatting of SDCard if it cannot be accessed on startup
-  - A number of significant performance improvements for the PX4 platform
 
 The most important bug fix is the one for short term loss of RC
 control. This is a very long standing bug which didn't have a

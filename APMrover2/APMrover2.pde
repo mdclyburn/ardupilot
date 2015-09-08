@@ -55,7 +55,6 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <time.h>
 
 // Libraries
 #include <AP_Common.h>
@@ -750,8 +749,6 @@ static void one_second_loop(void)
         }
         counter = 0;
     }
-
-	log_location();
 }
 
 static void update_GPS_50Hz(void)
@@ -907,40 +904,6 @@ static void update_navigation()
         }
         break;
 	}
-}
-
-void log_location()
-{
-	FILE* const log_file = fopen("location.log", "a");
-	if(log_file == NULL)
-	{
-		printf("WARNING: could not open log file.\n");
-		return;
-	}
-
-	AP_GPS::GPS_Status status = gps.status();
-	switch(status)
-	{
-		// No location fix is available.
-		case AP_GPS::NO_GPS:
-		case AP_GPS::NO_FIX:
-			fprintf(log_file, "%u NO GPS FIX\n", (unsigned) time(NULL));
-			break;
-		case AP_GPS::GPS_OK_FIX_2D:
-		case AP_GPS::GPS_OK_FIX_3D:
-		{
-			double lat = (double) current_loc.lat / 10000000;
-			double lng = (double) current_loc.lng / 10000000;
-			fprintf(log_file, "%u %lf %lf\n", (unsigned) time(NULL), lat, lng);
-			break;
-		}
-		default:
-			break;
-	}
-
-	fclose(log_file);
-
-	return;
 }
 
 AP_HAL_MAIN();
