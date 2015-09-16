@@ -1,8 +1,10 @@
 # APMboat Project
 
-This project was forked from the ardupilot project here on GitHub.
-This is a project that I am currently working on that involves modifying the code for the APMrover and adapting it to work with a boat.
-In addition, this custom firmware will allow for the receiving of data over a serial connection via the unused UART2 port.
+This project was forked from the Emlid ArduPilot project here on GitHub.
+This fork is development for using already modified APMrover source for the Navio add-on board, and adapting it to work with a boat.
+
+Stable work is merged into the `navio-boat` branch.
+Development work is merged into the `navio-boat-devel` branch from feature branches.
 
 # ArduPilot Project
 
