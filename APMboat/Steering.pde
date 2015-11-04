@@ -118,6 +118,9 @@ static void calc_throttle(float target_speed)
     // reduce the target speed by the reduction factor
     target_speed *= reduction;
 
+    // hard-coded throttle
+    target_speed *= 0.5;
+
     groundspeed_error = fabsf(target_speed) - ground_speed; 
     
     throttle = throttle_target + (g.pidSpeedThrottle.get_pid(groundspeed_error * 100) / 100);
